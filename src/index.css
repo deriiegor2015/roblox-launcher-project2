@@ -1,0 +1,40 @@
+@import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;700;900&family=JetBrains+Mono:wght@300;400;500;700&family=Inter:wght@300;400;500;600;700;800&display=swap');
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Space Grotesk", "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
+  
+  --color-brand: #00FF88;
+  --color-brand-dim: rgba(0, 255, 136, 0.15);
+  --color-brand-glow: rgba(0, 255, 136, 0.4);
+  --color-dark: #0A0A0A;
+  --color-panel: #111111;
+  --color-panel-light: #161616;
+  --color-border-custom: #222222;
+  --color-border-glow: #333333;
+  --color-text-dim: #666666;
+  --color-text-mid: #999999;
+}
+
+/* Custom scrollbar matching the tactical layout */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: #0A0A0A;
+}
+::-webkit-scrollbar-thumb {
+  background: #222222;
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #00FF88;
+}
+
+/* Dot grid backgrounds */
+.bg-dot-grid {
+  background-image: radial-gradient(#00FF88 0.5px, transparent 0.5px);
+  background-size: 20px 20px;
+}
