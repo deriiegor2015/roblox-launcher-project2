@@ -1,6 +1,6 @@
 import React from "react";
 import { RobloxPart, PartMaterial } from "../types";
-import { Sliders, Box } from "lucide-react";
+import { Sliders, Box, Focus, Copy, Check } from "lucide-react";
 
 interface PropertiesPanelProps {
   selectedPart: RobloxPart | null;
@@ -51,6 +51,21 @@ export default function PropertiesPanel({
       </div>
     );
   }
+
+  const [copied, setCopied] = React.useState(false);
+
+  React.useEffect(() => {
+    setCopied(false);
+  }, [selectedPart.id]);
+
+  const handleCopyId = () => {
+    navigator.clipboard.writeText(selectedPart.id).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    }).catch((err) => {
+      console.error("Failed to copy ID: ", err);
+    });
+  };
 
   const handleInputChange = (field: keyof RobloxPart, value: any) => {
     onChangePart({
@@ -104,6 +119,45 @@ export default function PropertiesPanel({
           <div className="grid grid-cols-3 items-center gap-2">
             <span className="text-text-mid">Parent</span>
             <span className="col-span-2 text-text-dim text-[11px] px-2.5 py-1.5 bg-panel-light rounded border border-border-custom">Workspace</span>
+          </div>
+        </div>
+
+        <div className="h-px bg-border-custom" />
+
+        {/* SECTION: Quick Actions */}
+        <div className="space-y-2" id="prop-section-actions">
+          <span className="text-[9px] text-text-dim font-bold tracking-widest uppercase">Швидкі дії (Quick Actions)</span>
+          <div className="grid grid-cols-2 gap-2">
+            <button
+              type="button"
+              onClick={() => {
+                window.dispatchEvent(new CustomEvent("focus-selected-object"));
+              }}
+              className="flex items-center justify-center gap-1.5 px-2 py-2 bg-brand-dim hover:bg-brand/15 border border-brand/20 hover:border-brand/50 text-brand font-bold text-[11px] rounded transition-all cursor-pointer shadow-[0_0_12px_rgba(0,162,255,0.04)] active:scale-[0.98]"
+              title="Сфокусувати камеру на вибраному об'єкті"
+              id="btn-properties-focus-object"
+            >
+              <Focus className="w-3.5 h-3.5 text-brand" />
+              <span>Фокус</span>
+            </button>
+            <button
+              type="button"
+              onClick={handleCopyId}
+              className={`flex items-center justify-center gap-1.5 px-2 py-2 border font-bold text-[11px] rounded transition-all cursor-pointer active:scale-[0.98] ${
+                copied
+                  ? "bg-emerald-500/10 hover:bg-emerald-500/15 border-emerald-500/30 text-emerald-400"
+                  : "bg-panel-light hover:bg-dark border-border-custom hover:border-text-dim/30 text-text-mid"
+              }`}
+              title="Копіювати унікальний ідентифікатор об'єкта"
+              id="btn-properties-copy-id"
+            >
+              {copied ? (
+                <Check className="w-3.5 h-3.5 text-emerald-400" />
+              ) : (
+                <Copy className="w-3.5 h-3.5 text-text-dim" />
+              )}
+              <span>{copied ? "Скопійовано!" : "Копіювати ID"}</span>
+            </button>
           </div>
         </div>
 

@@ -742,6 +742,17 @@ export default function ThreeViewport({
     controlsRef.current.update();
   };
 
+  // Listen to a custom global event to focus on the selected object from other panels (e.g., PropertiesPanel)
+  useEffect(() => {
+    const handleFocus = () => {
+      resetCamera();
+    };
+    window.addEventListener("focus-selected-object", handleFocus);
+    return () => {
+      window.removeEventListener("focus-selected-object", handleFocus);
+    };
+  }, [selectedPartId, resetCamera]);
+
   return (
     <div ref={containerRef} className="relative w-full h-full min-h-[300px] select-none group" id="three-viewport-container">
       <canvas

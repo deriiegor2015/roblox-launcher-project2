@@ -30,7 +30,14 @@ import {
   Save,
   Dribbble,
   Trash2,
-  Wrench
+  Wrench,
+  ShoppingBag,
+  Lock,
+  Unlock,
+  Link as LinkIcon,
+  Radio,
+  Plus,
+  ArrowRight
 } from "lucide-react";
 import { RobloxPart } from "../types";
 
@@ -207,10 +214,11 @@ const PREMADE_GAMES: PremadeGame[] = [
 
 interface MainMenuProps {
   onStartStudio: () => void;
-  onPlayPremadeGame: (game: any) => void;
+  onPlayPremadeGame: (game: any, roomId?: string) => void;
   cloudGames?: any[];
   onDeleteCloudGame?: (id: string) => void;
   onEditCloudGame?: (game: any) => void;
+  onSaveCloudGame?: (newGame: any) => void;
 }
 
 export default function MainMenu({ 
@@ -218,10 +226,331 @@ export default function MainMenu({
   onPlayPremadeGame,
   cloudGames = [],
   onDeleteCloudGame,
-  onEditCloudGame
+  onEditCloudGame,
+  onSaveCloudGame
 }: MainMenuProps) {
   // Navigation tabs
-  const [activeTab, setActiveTab] = useState<"Home" | "Games" | "Develop" | "Settings" | "Avatar">("Home");
+  const [activeTab, setActiveTab] = useState<"Home" | "Games" | "Develop" | "Settings" | "Avatar" | "Catalog" | "Communities">("Home");
+
+  // Custom AI UGC catalog items
+  const [customCatalogItems, setCustomCatalogItems] = useState<any[]>(() => {
+    try {
+      const saved = localStorage.getItem("roblox_custom_catalog_items");
+      return saved ? JSON.parse(saved) : [];
+    } catch (e) {
+      return [];
+    }
+  });
+
+  // Merge static lists with custom AI generated UGC catalog items
+  const allHats = [...HATS, ...customCatalogItems.filter(i => i.type === "hat")];
+  const allShirts = [...SHIRTS, ...customCatalogItems.filter(i => i.type === "shirt")];
+  const allPants = [...PANTS, ...customCatalogItems.filter(i => i.type === "pants")];
+  const allBacks = [...BACKS, ...customCatalogItems.filter(i => i.type === "back")];
+
+  // AI Game Generator States
+  const [aiGamePrompt, setAiGamePrompt] = useState("");
+  const [isGeneratingGame, setIsGeneratingGame] = useState(false);
+  const [generatedGameSuccess, setGeneratedGameSuccess] = useState<string | null>(null);
+  const [generatedGameError, setGeneratedGameError] = useState<string | null>(null);
+
+  // AI Skin Generator States
+  const [aiSkinPrompt, setAiSkinPrompt] = useState("");
+  const [isGeneratingSkin, setIsGeneratingSkin] = useState(false);
+  const [generatedSkinSuccess, setGeneratedSkinSuccess] = useState(false);
+  const [showAISkinModal, setShowAISkinModal] = useState(false);
+  const [generatedSkinError, setGeneratedSkinError] = useState<string | null>(null);
+
+  // AI Clothing UGC States
+  const [aiClothingPrompt, setAiClothingPrompt] = useState("");
+  const [isGeneratingClothing, setIsGeneratingClothing] = useState(false);
+  const [generatedClothingSuccess, setGeneratedClothingSuccess] = useState<string | null>(null);
+  const [generatedClothingError, setGeneratedClothingError] = useState<string | null>(null);
+  const [aiModalTab, setAiModalTab] = useState<"skin" | "clothing">("skin");
+
+  // Account Switcher and Robux State
+  const [currentAccount, setCurrentAccount] = useState<"Yegor" | "RobloxLAUNCHER">(() => {
+    const saved = localStorage.getItem("roblox_current_account") as "Yegor" | "RobloxLAUNCHER";
+    return saved === "Yegor" || saved === "RobloxLAUNCHER" ? saved : "RobloxLAUNCHER";
+  });
+
+  const [hasHiddenPremium, setHasHiddenPremium] = useState<boolean>(() => {
+    const saved = localStorage.getItem("roblox_hidden_premium");
+    return saved !== "false"; // default to true
+  });
+
+  const [robuxBalance, setRobuxBalance] = useState<number>(999999999);
+
+  // Sync active account and nickname
+  useEffect(() => {
+    localStorage.setItem("roblox_current_account", currentAccount);
+    localStorage.setItem("roblox_persona_username", currentAccount);
+    setAvatarConfig((prev) => ({
+      ...prev,
+      nickname: currentAccount
+    }));
+  }, [currentAccount]);
+
+  useEffect(() => {
+    localStorage.setItem("roblox_hidden_premium", hasHiddenPremium ? "true" : "false");
+  }, [hasHiddenPremium]);
+
+  // Owned Clothing Items
+  const [ownedItems, setOwnedItems] = useState<string[]>(() => {
+    try {
+      const saved = localStorage.getItem("roblox_owned_items");
+      return saved ? JSON.parse(saved) : ["classic-cap", "roblox-hoodie", "jeans", "none"];
+    } catch (e) {
+      return ["classic-cap", "roblox-hoodie", "jeans", "none"];
+    }
+  });
+
+  // Shop Notification
+  const [catalogNotification, setCatalogNotification] = useState<string | null>(null);
+
+  const buyItem = (itemId: string, price: number, itemName: string) => {
+    if (ownedItems.includes(itemId)) {
+      setCatalogNotification(`Ви вже володієте цим елементом "${itemName}"!`);
+      setTimeout(() => setCatalogNotification(null), 3000);
+      return;
+    }
+    const updated = [...ownedItems, itemId];
+    setOwnedItems(updated);
+    localStorage.setItem("roblox_owned_items", JSON.stringify(updated));
+    setCatalogNotification(`🎉 Успішно куплено "${itemName}" за ${price} Robux! Одягніть його в Редакторі Аватара.`);
+    setTimeout(() => setCatalogNotification(null), 4000);
+  };
+
+  // Real Friends List with Profiles and Clickable Links
+  const [friendsList, setFriendsList] = useState<any[]>([
+    {
+      id: "friend-builderman",
+      name: "Builderman_CEO",
+      avatar: "🛠️",
+      online: true,
+      statusText: "В мережі — грає в Natural Disaster Sandbox",
+      playingGameId: "natural-disaster",
+      desc: "Офіційний засновник Roblox. Люблю створювати ігри та допомагати юним розробникам!",
+      profileLink: "https://roblox.com/users/1/profile",
+      personalGames: ["Natural Disaster Sandbox", "Crossroads Battleground"]
+    },
+    {
+      id: "friend-yegorpro",
+      name: "Yegor_Dev_2026",
+      avatar: "🪐",
+      online: true,
+      statusText: "В мережі — грає в Tower of Hell (Lite)",
+      playingGameId: "tower-of-hell",
+      desc: "Професійний Luau розробник, творець Tower of Hell (Lite) та систем безпеки хмари.",
+      profileLink: "https://roblox.com/users/2026/profile",
+      personalGames: ["Tower of Hell (Lite)", "Roblox Cloud Admin Hub"]
+    },
+    {
+      id: "friend-david",
+      name: "DavidBaszucki",
+      avatar: "👔",
+      online: true,
+      statusText: "В мережі — грає в Speed Run (V)",
+      playingGameId: "speed-run",
+      desc: "Генеральний директор Roblox Corporation. Завжди онлайн у ваших думках!",
+      profileLink: "https://roblox.com/users/2/profile",
+      personalGames: ["Bloxburg Architects", "Classic Crossroads"]
+    },
+    {
+      id: "friend-telamon",
+      name: "Telamon",
+      avatar: "💣",
+      online: false,
+      statusText: "Офлайн (У школі, скоро зайде!)",
+      desc: "Поціновувач хаосу, вибухівки та смаженої курки. Творець класичних карт.",
+      profileLink: "https://roblox.com/users/104/profile",
+      personalGames: ["Doomspire Brickbattle", "Chaos Canyon"]
+    }
+  ]);
+
+  // Profile View Modal State
+  const [selectedProfile, setSelectedProfile] = useState<any | null>(null);
+
+  // Communities state
+  const [communities, setCommunities] = useState<any[]>(() => {
+    try {
+      const saved = localStorage.getItem("roblox_communities");
+      if (saved) return JSON.parse(saved);
+    } catch (e) {}
+    return [
+      {
+        id: "com-luau",
+        name: "Luau Devs Union",
+        description: "Найбільша спільнота Luau програмістів у Sandbox! Створюємо скрипти, обговорюємо оптимізацію та ділимося досвідом.",
+        creator: "Yegor_Dev_2026",
+        membersCount: 1250,
+        emoji: "💻",
+        comments: [
+          { sender: "Guest_77", text: "Як налаштувати силу батута?", time: "12:30" },
+          { sender: "Yegor_Dev_2026", text: "Поміняй параметр розміру або додай вектор швидкості!", time: "12:45" }
+        ]
+      },
+      {
+        id: "com-toh",
+        name: "Tower of Hell Champions",
+        description: "Для справжніх хардкорних гравців! Обговорення проходження веж без чекпоінтів та спідранів.",
+        creator: "RobloxLAUNCHER",
+        membersCount: 840,
+        emoji: "🗼",
+        comments: [
+          { sender: "Classic_Noob", text: "Я впав знову на останньому поверсі :(", time: "14:10" }
+        ]
+      }
+    ];
+  });
+
+  const [joinedCommunities, setJoinedCommunities] = useState<string[]>(() => {
+    try {
+      const saved = localStorage.getItem("roblox_joined_communities");
+      return saved ? JSON.parse(saved) : ["com-luau"];
+    } catch (e) {
+      return ["com-luau"];
+    }
+  });
+
+  const [showCreateCommunityModal, setShowCreateCommunityModal] = useState<boolean>(false);
+  const [newCommunityName, setNewCommunityName] = useState<string>("");
+  const [newCommunityDesc, setNewCommunityDesc] = useState<string>("");
+  const [newCommunityEmoji, setNewCommunityEmoji] = useState<string>("👥");
+
+  const [viewingCommunity, setViewingCommunity] = useState<any | null>(null);
+  const [communityComment, setCommunityComment] = useState<string>("");
+
+  const handleCreateCommunity = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newCommunityName.trim()) return;
+
+    // Costs 2 Robux. With Hidden Premium it's always successful!
+    const newCom = {
+      id: `com-${Date.now()}`,
+      name: newCommunityName.trim(),
+      description: newCommunityDesc.trim() || "Спільнота однодумців Roblox Sandbox.",
+      creator: currentAccount,
+      membersCount: 1,
+      emoji: newCommunityEmoji,
+      comments: []
+    };
+
+    const updated = [newCom, ...communities];
+    setCommunities(updated);
+    localStorage.setItem("roblox_communities", JSON.stringify(updated));
+
+    const updatedJoined = [...joinedCommunities, newCom.id];
+    setJoinedCommunities(updatedJoined);
+    localStorage.setItem("roblox_joined_communities", JSON.stringify(updatedJoined));
+
+    setShowCreateCommunityModal(false);
+    setNewCommunityName("");
+    setNewCommunityDesc("");
+    setCatalogNotification(`👥 Спільноту "${newCom.name}" успішно створено за 2 Robux!`);
+    setTimeout(() => setCatalogNotification(null), 3000);
+  };
+
+  const handleJoinCommunity = (comId: string) => {
+    if (joinedCommunities.includes(comId)) {
+      // Leave
+      const updated = joinedCommunities.filter(id => id !== comId);
+      setJoinedCommunities(updated);
+      localStorage.setItem("roblox_joined_communities", JSON.stringify(updated));
+      
+      // Decrease members count
+      setCommunities(prev => prev.map(c => c.id === comId ? { ...c, membersCount: Math.max(1, c.membersCount - 1) } : c));
+    } else {
+      // Join
+      const updated = [...joinedCommunities, comId];
+      setJoinedCommunities(updated);
+      localStorage.setItem("roblox_joined_communities", JSON.stringify(updated));
+
+      // Increase members count
+      setCommunities(prev => prev.map(c => c.id === comId ? { ...c, membersCount: c.membersCount + 1 } : c));
+    }
+  };
+
+  const handlePostCommunityComment = (e: React.FormEvent, comId: string) => {
+    e.preventDefault();
+    if (!communityComment.trim()) return;
+
+    const newComment = {
+      sender: currentAccount,
+      text: communityComment.trim(),
+      time: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
+    };
+
+    setCommunities(prev => {
+      const updated = prev.map(c => {
+        if (c.id === comId) {
+          return {
+            ...c,
+            comments: [...c.comments, newComment]
+          };
+        }
+        return c;
+      });
+      localStorage.setItem("roblox_communities", JSON.stringify(updated));
+      // Update local modal if open
+      if (viewingCommunity && viewingCommunity.id === comId) {
+        setViewingCommunity(updated.find(c => c.id === comId));
+      }
+      return updated;
+    });
+
+    setCommunityComment("");
+  };
+
+  // Roblox Cloud Games Moderation Scanner
+  const [gamesTab, setGamesTab] = useState<"public" | "cloud">("public");
+  const [moderationScanId, setModerationScanId] = useState<string | null>(null);
+  const [scannedGames, setScannedGames] = useState<Record<string, { status: "approved" | "suspicious" | "pending"; reasons: string[] }>>(() => {
+    try {
+      const saved = localStorage.getItem("roblox_cloud_scans");
+      return saved ? JSON.parse(saved) : {};
+    } catch (e) {
+      return {};
+    }
+  });
+
+  const runModerationScan = (gameId: string, title: string, description: string, parts: any[]) => {
+    setModerationScanId(gameId);
+    setTimeout(() => {
+      // Search for suspicious words
+      const reasons: string[] = [];
+      const contentToScan = (title + " " + description).toLowerCase();
+      
+      const suspiciousWords = ["cheat", "unlimited", "free robux", "hack", "virus", "kill", "lava", "exploit", "robux", "noob"];
+      suspiciousWords.forEach(word => {
+        if (contentToScan.includes(word)) {
+          reasons.push(`Знайдено підозріле слово в тексті: "${word}"`);
+        }
+      });
+
+      // Scan parts list for dangerous traps or script hacks
+      parts.forEach((part: any) => {
+        if (part.name && suspiciousWords.some(w => part.name.toLowerCase().includes(w))) {
+          reasons.push(`Знайдено деталь з підозрілою назвою: "${part.name}"`);
+        }
+        if (part.specialType === "killbrick") {
+          reasons.push(`Знайдено смертельну пастку: "Killbrick"`);
+        }
+      });
+
+      const status = reasons.length > 0 ? "suspicious" : "approved";
+      
+      setScannedGames(prev => {
+        const updated = {
+          ...prev,
+          [gameId]: { status, reasons }
+        };
+        localStorage.setItem("roblox_cloud_scans", JSON.stringify(updated));
+        return updated;
+      });
+      setModerationScanId(null);
+    }, 1500);
+  };
 
   // Avatar Editor State
   const [avatarConfig, setAvatarConfig] = useState<RobloxAvatarConfig>(() => {
@@ -268,6 +597,185 @@ export default function MainMenu({
     };
     setAvatarConfig(fresh);
     localStorage.setItem("roblox_user_avatar", JSON.stringify(fresh));
+  };
+
+  // AI Game Generator Handler
+  const handleGenerateAIGame = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!aiGamePrompt.trim() || isGeneratingGame) return;
+
+    setIsGeneratingGame(true);
+    setGeneratedGameSuccess(null);
+    setGeneratedGameError(null);
+
+    try {
+      const response = await fetch("/api/ai/generate-game", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ prompt: aiGamePrompt }),
+      });
+
+      if (!response.ok) {
+        throw new Error("Не вдалося згенерувати гру. Спробуйте ще раз.");
+      }
+
+      const data = await response.json();
+      if (!data.success || !data.game) {
+        throw new Error(data.error || "Невідома помилка при генерації гри.");
+      }
+
+      const gameData = data.game;
+      const finalGame = {
+        id: `cloud-ai-${Date.now()}`,
+        title: gameData.title || "AI Generated World",
+        creator: currentAccount,
+        description: gameData.description || "Згенеровано штучним інтелектом у Roblox Studio Sandbox.",
+        parts: gameData.parts || [],
+        isAiGenerated: true,
+        likes: "100%",
+        playersCount: "0",
+        iconBg: "from-amber-500 via-purple-600 to-indigo-700",
+        emoji: gameData.emoji || "🤖",
+        difficulty: gameData.difficulty || "Середня"
+      };
+
+      if (onSaveCloudGame) {
+        onSaveCloudGame(finalGame);
+      } else {
+        const saved = localStorage.getItem("roblox_cloud_games");
+        const list = saved ? JSON.parse(saved) : [];
+        localStorage.setItem("roblox_cloud_games", JSON.stringify([finalGame, ...list]));
+      }
+
+      setGeneratedGameSuccess(`🎉 Гру "${finalGame.title}" успішно згенеровано AI та збережено у вашому Roblox Cloud!`);
+      setAiGamePrompt("");
+    } catch (err: any) {
+      console.error(err);
+      setGeneratedGameError(err.message || "Сталася помилка з'єднання з AI сервером.");
+    } finally {
+      setIsGeneratingGame(false);
+    }
+  };
+
+  // AI Skin Generator Handler
+  const handleGenerateAISkin = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!aiSkinPrompt.trim() || isGeneratingSkin) return;
+
+    setIsGeneratingSkin(true);
+    setGeneratedSkinSuccess(false);
+    setGeneratedSkinError(null);
+
+    try {
+      const response = await fetch("/api/ai/generate-skin", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ prompt: aiSkinPrompt }),
+      });
+
+      if (!response.ok) {
+        throw new Error("Не вдалося згенерувати скін. Спробуйте ще раз.");
+      }
+
+      const data = await response.json();
+      if (!data.success || !data.avatar) {
+        throw new Error(data.error || "Невідома помилка при генерації скіна.");
+      }
+
+      const skinData = data.avatar;
+      
+      const newConfig: RobloxAvatarConfig = {
+        ...avatarConfig,
+        bodyType: skinData.bodyType || "R6",
+        skinTone: skinData.skinTone || "#FFD13B",
+        face: skinData.face || "smile",
+        hat: skinData.hat || "classic-cap",
+        shirt: skinData.shirt || "roblox-hoodie",
+        pants: skinData.pants || "jeans",
+        back: skinData.back || "none",
+        animation: skinData.animation || "idle"
+      };
+
+      setAvatarConfig(newConfig);
+      localStorage.setItem("roblox_user_avatar", JSON.stringify(newConfig));
+
+      const itemsToUnlock = [skinData.hat, skinData.shirt, skinData.pants, skinData.back].filter(id => id && id !== "none");
+      if (itemsToUnlock.length > 0) {
+        setOwnedItems(prev => {
+          const updated = [...new Set([...prev, ...itemsToUnlock])];
+          localStorage.setItem("roblox_owned_items", JSON.stringify(updated));
+          return updated;
+        });
+      }
+
+      setGeneratedSkinSuccess(true);
+      setAiSkinPrompt("");
+      setTimeout(() => {
+        setShowAISkinModal(false);
+        setGeneratedSkinSuccess(false);
+      }, 2000);
+    } catch (err: any) {
+      console.error(err);
+      setGeneratedSkinError(err.message || "Сталася помилка зв'язку з AI сервером.");
+    } finally {
+      setIsGeneratingSkin(false);
+    }
+  };
+
+  // AI Clothing UGC Handler
+  const handleGenerateAIClothing = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!aiClothingPrompt.trim() || isGeneratingClothing) return;
+
+    setIsGeneratingClothing(true);
+    setGeneratedClothingSuccess(null);
+    setGeneratedClothingError(null);
+
+    try {
+      const response = await fetch("/api/ai/generate-clothing", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ prompt: aiClothingPrompt }),
+      });
+
+      if (!response.ok) {
+        throw new Error("Не вдалося створити одяг. Спробуйте ще раз.");
+      }
+
+      const data = await response.json();
+      if (!data.success || !data.clothing) {
+        throw new Error(data.error || "Невідома помилка при розробці одягу.");
+      }
+
+      const newItem = data.clothing;
+      const uniqueId = `ai-item-${Date.now()}`;
+      const finalItem = {
+        id: uniqueId,
+        type: newItem.type || "shirt",
+        name: newItem.name || "AI Designer Outfit",
+        emoji: newItem.emoji || "👕",
+        rarity: newItem.rarity || "Epic",
+        price: newItem.price || 0,
+        desc: newItem.desc || "Створено штучним інтелектом у Roblox Studio Sandbox.",
+        isAiGenerated: true
+      };
+
+      const updatedList = [finalItem, ...customCatalogItems];
+      setCustomCatalogItems(updatedList);
+      localStorage.setItem("roblox_custom_catalog_items", JSON.stringify(updatedList));
+
+      const updatedOwned = [...new Set([...ownedItems, uniqueId])];
+      setOwnedItems(updatedOwned);
+      localStorage.setItem("roblox_owned_items", JSON.stringify(updatedOwned));
+
+      setGeneratedClothingSuccess(`🎉 Одяг "${finalItem.name}" успішно розроблено AI! Він безкоштовно доданий у ваш інвентар та доступний у каталозі.`);
+      setAiClothingPrompt("");
+    } catch (err: any) {
+      console.error(err);
+      setGeneratedClothingError(err.message || "Сталася помилка з'єднання з AI UGC сервером.");
+    } finally {
+      setIsGeneratingClothing(false);
+    }
   };
 
   // Persona Verification State
@@ -321,19 +829,53 @@ export default function MainMenu({
       {/* GLOWING AMBIENT HEADER */}
       <header className="bg-[#12151b] border-b border-white/5 px-6 py-4 flex items-center justify-between shrink-0 shadow-xl relative z-10">
         <div className="flex items-center gap-3">
-          <div className="w-9 h-9 border-4 border-brand transform rotate-12 flex items-center justify-center font-black rounded-sm shadow-md bg-black">
-            <span className="text-white text-[10px] transform -rotate-12">R</span>
+          <div className="relative w-9 h-9 transform rotate-6 hover:rotate-12 transition-transform duration-300">
+            <img 
+              src="/logo512.jpg" 
+              alt="Roblox Sandbox Icon" 
+              className="w-full h-full object-cover rounded-lg border border-[#00FF88]/40 shadow-[0_0_12px_rgba(0,255,136,0.25)]" 
+              referrerPolicy="no-referrer"
+            />
           </div>
           <div>
-            <span className="text-sm font-bold tracking-tight block">ROBLOX LAUNCHER</span>
+            <div className="flex items-center gap-2">
+              <span className="text-sm font-black tracking-tight block text-white uppercase">ROBLOX SANDBOX</span>
+              <span className="text-[9px] bg-brand text-black font-extrabold px-1.5 py-0.5 rounded border border-brand/20 flex items-center gap-0.5">
+                <span>App Store</span>
+                <span className="bg-black text-brand px-1 py-0.2 rounded text-[8px]">4+</span>
+              </span>
+            </div>
             <span className="text-[10px] text-[#00FF88] font-mono font-bold uppercase tracking-wider flex items-center gap-1">
-              🟢 Live Engine Active v2.6.0
+              🟢 Live Engine Active v2.6.0 • Опубліковано в App Store
             </span>
           </div>
         </div>
 
         {/* Global User info & Blue Verification status */}
         <div className="flex items-center gap-4">
+          {/* Robux Balance Indicator */}
+          <div className="bg-[#1a1f29] border border-brand/20 rounded-lg py-1.5 px-3 flex items-center gap-2 text-xs font-bold text-amber-400 font-mono shadow-md" title="Баланс Robux з Прихованим Преміумом">
+            <span className="text-[11px] bg-amber-400 text-black px-1 py-0.5 rounded font-black leading-none font-sans">R$</span>
+            <span className="text-sm">{hasHiddenPremium ? "∞" : "25,000"}</span>
+            <span className="text-[9px] text-brand uppercase bg-brand/10 border border-brand/20 px-1 py-0.2 rounded font-sans tracking-wide">Premium</span>
+          </div>
+
+          {/* Account Selector */}
+          <div className="flex items-center gap-1.5 bg-[#1a1f29] border border-white/10 rounded-lg py-1 px-2.5 text-xs text-white">
+            <span className="text-gray-400">Акаунт:</span>
+            <select
+              value={currentAccount}
+              onChange={(e) => {
+                const val = e.target.value as "Yegor" | "RobloxLAUNCHER";
+                setCurrentAccount(val);
+              }}
+              className="bg-transparent border-none text-[#00FF88] font-bold focus:ring-0 focus:outline-none cursor-pointer pr-1"
+            >
+              <option value="RobloxLAUNCHER" className="bg-[#12151b] text-white">RobloxLAUNCHER (Public)</option>
+              <option value="Yegor" className="bg-[#12151b] text-white">Yegor (Private)</option>
+            </select>
+          </div>
+
           <div className="bg-[#1a1f29] border border-white/10 rounded-lg py-1.5 px-3 flex items-center gap-2 text-xs font-mono">
             <span className="w-2.5 h-2.5 rounded-full bg-[#00FF88] animate-pulse" />
             <span className="text-gray-300">Статус:</span>
@@ -421,6 +963,32 @@ export default function MainMenu({
             </button>
 
             <button
+              id="sidebar-tab-catalog"
+              onClick={() => setActiveTab("Catalog")}
+              className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                activeTab === "Catalog" 
+                  ? "bg-brand text-black shadow-lg shadow-brand/15" 
+                  : "text-gray-400 hover:text-white hover:bg-white/5"
+              }`}
+            >
+              <ShoppingBag className="w-4 h-4" />
+              <span>Магазин одягу (Catalog)</span>
+            </button>
+
+            <button
+              id="sidebar-tab-communities"
+              onClick={() => setActiveTab("Communities")}
+              className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                activeTab === "Communities" 
+                  ? "bg-brand text-black shadow-lg shadow-brand/15" 
+                  : "text-gray-400 hover:text-white hover:bg-white/5"
+              }`}
+            >
+              <Users className="w-4 h-4" />
+              <span>Спільноти (Communities)</span>
+            </button>
+
+            <button
               id="sidebar-tab-settings"
               onClick={() => setActiveTab("Settings")}
               className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
@@ -435,9 +1003,16 @@ export default function MainMenu({
           </div>
 
           {/* Footer of Sidebar */}
-          <div className="bg-black/20 border border-white/5 p-3 rounded-lg text-[10px] text-gray-500 font-mono space-y-1">
+          <div className="bg-black/20 border border-white/5 p-3 rounded-lg text-[10px] text-gray-500 font-mono space-y-1.5">
             <span className="text-gray-400 block font-bold">Спільнота Roblox</span>
             <p>Проєкт створено для тестування скриптів Luau та 3D об'єктів.</p>
+            <div className="pt-1.5 border-t border-white/5 flex items-center justify-between">
+              <span className="text-[9px] text-gray-400">Віковий ценз:</span>
+              <span className="bg-white/10 text-white font-black px-1.5 py-0.5 rounded text-[9px] border border-white/10">4+</span>
+            </div>
+            <div className="flex items-center gap-1 text-[8px] text-brand/80 font-semibold bg-brand/5 p-1 rounded border border-brand/10">
+              ⚡ Офіційний реліз в App Store
+            </div>
           </div>
         </nav>
 
@@ -527,6 +1102,126 @@ export default function MainMenu({
                   </button>
                 </div>
               </div>
+
+              {/* Account Profile & Friends List Section */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mt-6">
+                {/* Account card */}
+                <div className="bg-[#12151b] border border-white/5 rounded-2xl p-5 space-y-4 shadow-xl">
+                  <div className="flex items-center gap-3 border-b border-white/5 pb-3">
+                    <div className="w-12 h-12 bg-gradient-to-br from-brand to-brand-bright rounded-full flex items-center justify-center text-2xl border-2 border-white/10 shadow-lg">
+                      {currentAccount === "Yegor" ? "🪐" : "🚀"}
+                    </div>
+                    <div>
+                      <div className="flex items-center gap-1.5">
+                        <span className="font-black text-white text-base">{currentAccount}</span>
+                        <span className="bg-[#00FF88]/15 text-[#00FF88] border border-[#00FF88]/30 px-1.5 py-0.2 rounded text-[9px] font-bold tracking-wide uppercase">Active</span>
+                      </div>
+                      <span className="text-xs text-gray-400 font-mono">ID: {currentAccount === "Yegor" ? "SECRET_USER_99" : "ROBLOX_LAUNCHER_01"}</span>
+                    </div>
+                  </div>
+
+                  <div className="space-y-2.5">
+                    <div className="bg-brand/10 border border-brand/20 p-3 rounded-xl space-y-1">
+                      <div className="flex items-center gap-1.5 text-xs font-bold text-brand uppercase font-mono">
+                        <Crown className="w-3.5 h-3.5" />
+                        <span>Прихований Преміум</span>
+                      </div>
+                      <p className="text-[10px] text-gray-300 leading-relaxed">
+                        Безмежні робукси активовано для обох акаунтів Yegor та RobloxLAUNCHER. Ви маєте повний безкоштовний доступ до всіх ексклюзивних предметів та створення спільнот!
+                      </p>
+                    </div>
+
+                    <div className="space-y-1">
+                      <span className="text-[10px] text-gray-400 font-bold uppercase font-mono block">Текст статусу в профілі</span>
+                      <p className="text-xs text-gray-300 bg-black/40 p-2.5 rounded-lg border border-white/5 font-mono">
+                        {currentAccount === "Yegor" 
+                          ? "Привіт! Я Єгор, розробник цього Roblox Launcher Sandbox. Мій приватний акаунт для тестів." 
+                          : "Офіційний запускний клієнт Roblox Launcher. Спробуйте пограти в наші круті паркури!"
+                        }
+                      </p>
+                    </div>
+
+                    <div className="space-y-1">
+                      <span className="text-[10px] text-gray-400 font-bold uppercase font-mono block">Посилання у вашому профілі</span>
+                      <a 
+                        href="#dev-link" 
+                        onClick={(e) => {
+                          e.preventDefault();
+                          setCatalogNotification(`🔗 Посилання в профілі веде на: ${currentAccount === "Yegor" ? "https://roblox.com/developers/yegor" : "https://roblox.com/launcher/home"}`);
+                          setTimeout(() => setCatalogNotification(null), 3000);
+                        }}
+                        className="text-brand hover:underline text-xs flex items-center gap-1 font-mono cursor-pointer"
+                      >
+                        <LinkIcon className="w-3 h-3" />
+                        <span>{currentAccount === "Yegor" ? "roblox.com/developers/yegor" : "roblox.com/launcher/home"}</span>
+                      </a>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Friends list card */}
+                <div className="bg-[#12151b] border border-white/5 rounded-2xl p-5 space-y-4 shadow-xl">
+                  <div className="flex items-center justify-between border-b border-white/5 pb-3">
+                    <span className="font-bold text-xs text-gray-400 font-mono uppercase tracking-wider">СПИСОК ДРУЗІВ (Real Friends)</span>
+                    <span className="text-[10px] bg-white/5 text-gray-400 px-2 py-0.5 rounded-full font-mono font-bold">
+                      {friendsList.filter((f) => f.online).length} / {friendsList.length} Online
+                    </span>
+                  </div>
+
+                  <div className="space-y-2.5 max-h-[240px] overflow-y-auto pr-1">
+                    {friendsList.map((friend) => (
+                      <div key={friend.id} className="bg-black/20 hover:bg-black/45 border border-white/5 p-2.5 rounded-xl flex items-center justify-between transition-all">
+                        <div className="flex items-center gap-2.5">
+                          <div className="w-9 h-9 bg-[#1a1f29] border border-white/5 rounded-full flex items-center justify-center text-lg relative">
+                            {friend.avatar}
+                            {friend.online && (
+                              <span className="absolute bottom-0 right-0 w-2.5 h-2.5 bg-[#00FF88] rounded-full border border-black animate-ping" />
+                            )}
+                          </div>
+                          <div>
+                            <span className="text-xs font-black block text-gray-200">{friend.name}</span>
+                            <span className={`text-[9px] font-mono font-bold block ${
+                              friend.online ? "text-[#00FF88]" : "text-amber-500"
+                            }`}>
+                              {friend.online ? "🟢 " : "🕒 "} {friend.statusText}
+                            </span>
+                          </div>
+                        </div>
+
+                        <div className="flex items-center gap-1.5">
+                          {friend.online && friend.playingGameId && (
+                            <button
+                              id={`friend-join-btn-${friend.id}`}
+                              onClick={() => {
+                                const targetGame = PREMADE_GAMES.find(g => g.id === friend.playingGameId);
+                                if (targetGame) {
+                                  onPlayPremadeGame(targetGame, friend.playingGameId);
+                                }
+                              }}
+                              className="px-2.5 py-1.5 bg-[#00FF88] hover:bg-[#00dd77] text-black font-extrabold text-[10px] rounded transition-all cursor-pointer flex items-center gap-1 hover:scale-105 active:scale-95"
+                              title={`Приєднатися до мультиплеєру ${friend.name}`}
+                            >
+                              <Play className="w-3 h-3 fill-black text-black" />
+                              <span>Приєднатися</span>
+                            </button>
+                          )}
+                          <button
+                            onClick={() => setSelectedProfile(friend)}
+                            className="px-2 py-1.5 bg-brand/10 hover:bg-brand text-brand hover:text-black font-bold text-[10px] rounded transition-all cursor-pointer flex items-center gap-1"
+                          >
+                            <span>Профіль</span>
+                            <ArrowRight className="w-3 h-3" />
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+
+                  <p className="text-[10px] text-gray-500 italic text-center font-mono pt-1">
+                    «Запрошуйте друзів до вашого сервера, використовуючи посилання публікації!»
+                  </p>
+                </div>
+              </div>
             </div>
           )}
 
@@ -536,7 +1231,7 @@ export default function MainMenu({
               <div className="flex items-center justify-between border-b border-white/5 pb-4">
                 <div>
                   <h2 className="text-xl font-black">Каталог ігор (Roblox Player)</h2>
-                  <p className="text-xs text-gray-400">Оберіть готову гру розробників спільноти та пограйте з іншими гравцями!</p>
+                  <p className="text-xs text-gray-400">Оберіть категорію ігор: грайте в офіційні симуляції або досліджуйте сховище Roblox Cloud!</p>
                 </div>
                 
                 {/* Search bar decoration */}
@@ -546,130 +1241,293 @@ export default function MainMenu({
                 </div>
               </div>
 
-              {/* List of custom Games */}
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                {PREMADE_GAMES.map((game) => (
-                  <div 
-                    key={game.id} 
-                    className="bg-[#12151b] border border-white/5 rounded-xl overflow-hidden shadow-xl flex flex-col justify-between hover:scale-[1.01] transition-all"
-                  >
-                    <div className={`bg-gradient-to-br ${game.iconBg} p-6 flex items-center justify-between relative overflow-hidden`}>
-                      <span className="text-5xl filter drop-shadow-lg z-10">{game.emoji}</span>
-                      <div className="absolute right-2 bottom-2 bg-black/60 backdrop-blur px-2.5 py-1 rounded text-[10px] font-mono text-white font-bold tracking-wider">
-                        {game.difficulty} складність
-                      </div>
-                    </div>
-                    
-                    <div className="p-5 flex-1 flex flex-col justify-between gap-4">
-                      <div className="space-y-1">
-                        <div className="flex items-center justify-between">
-                          <h3 className="font-bold text-sm text-white">{game.title}</h3>
-                          <span className="text-[10px] text-gray-400 font-mono">by {game.creator}</span>
-                        </div>
-                        <p className="text-[11px] text-gray-400 leading-relaxed">{game.description}</p>
-                      </div>
-
-                      <div className="flex items-center justify-between text-[11px] text-gray-500 font-mono border-t border-white/5 pt-3">
-                        <div className="flex items-center gap-3">
-                          <span className="flex items-center gap-1 text-[#00FF88]">👍 {game.likes}</span>
-                          <span className="flex items-center gap-1 text-gray-400">👤 {game.playersCount} онлайн</span>
-                        </div>
-                        
-                        <button
-                          id={`game-play-btn-${game.id}`}
-                          onClick={() => onPlayPremadeGame(game)}
-                          className="px-4 py-1.5 bg-[#00FF88] hover:bg-[#00dd77] text-black font-bold rounded flex items-center gap-1 cursor-pointer font-sans transition-all text-[11px] hover:scale-105 active:scale-95"
-                        >
-                          <Play className="w-3 h-3 fill-black text-black" />
-                          <span>Грати (Play)</span>
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-                ))}
+              {/* Category Selector Tabs */}
+              <div className="flex border-b border-white/5 gap-2">
+                <button
+                  onClick={() => setGamesTab("public")}
+                  className={`px-4 py-2.5 text-xs font-bold border-b-2 transition-all cursor-pointer flex items-center gap-2 ${
+                    gamesTab === "public"
+                      ? "border-[#00FF88] text-[#00FF88] font-black bg-white/5 rounded-t-lg"
+                      : "border-transparent text-gray-400 hover:text-white hover:bg-white/2"
+                  }`}
+                >
+                  <Gamepad2 className="w-4 h-4" />
+                  <span>Грати в ігри (Public Games)</span>
+                </button>
+                <button
+                  onClick={() => setGamesTab("cloud")}
+                  className={`px-4 py-2.5 text-xs font-bold border-b-2 transition-all cursor-pointer flex items-center gap-2 ${
+                    gamesTab === "cloud"
+                      ? "border-brand text-brand font-black bg-white/5 rounded-t-lg"
+                      : "border-transparent text-gray-400 hover:text-white hover:bg-white/2"
+                  }`}
+                >
+                  <Radio className="w-4 h-4" />
+                  <span>Roblox Cloud (Приватні & Хмарні ігри)</span>
+                </button>
+                <button
+                  onClick={() => setGamesTab("ai")}
+                  className={`px-4 py-2.5 text-xs font-bold border-b-2 transition-all cursor-pointer flex items-center gap-2 ${
+                    gamesTab === "ai"
+                      ? "border-amber-400 text-amber-400 font-black bg-white/5 rounded-t-lg"
+                      : "border-transparent text-gray-400 hover:text-white hover:bg-white/2"
+                  }`}
+                >
+                  <Sparkles className="w-4 h-4" />
+                  <span>AI Генерація Ігор 🤖</span>
+                </button>
               </div>
 
-              {/* My Roblox Cloud Saved Games */}
-              <div className="pt-8 border-t border-white/5 space-y-4">
-                <div>
-                  <h3 className="text-md font-bold tracking-tight text-brand flex items-center gap-2">
-                    <Globe className="w-4.5 h-4.5 text-brand animate-pulse" />
-                    <span>Хмарне сховище Roblox Cloud (My Cloud Projects)</span>
-                  </h3>
-                  <p className="text-[11px] text-gray-400">Всі ваші власні 3D-проекти, опубліковані у хмару Roblox Cloud за допомогою Studio.</p>
-                </div>
-
-                {cloudGames.length === 0 ? (
-                  <div className="bg-[#12151b]/40 border border-dashed border-white/10 p-6 rounded-xl text-center space-y-3">
-                    <p className="text-xs text-gray-400">Ви ще не опублікували жодної гри у хмару Roblox Cloud.</p>
-                    <button
-                      onClick={onStartStudio}
-                      className="px-4 py-1.5 bg-brand hover:bg-brand-bright text-black font-bold text-[10px] uppercase tracking-wider rounded transition-all cursor-pointer font-sans"
-                    >
-                      Створити гру в Studio ⚒️
-                    </button>
-                  </div>
-                ) : (
+              {/* Public Games List Tab */}
+              {gamesTab === "public" && (
+                <div className="space-y-4">
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    {cloudGames.map((game: any) => (
+                    {PREMADE_GAMES.map((game) => (
                       <div 
                         key={game.id} 
-                        className="bg-[#12151b] border border-brand/20 rounded-xl overflow-hidden shadow-xl flex flex-col justify-between hover:border-brand/40 transition-all relative group"
+                        className="bg-[#12151b] border border-white/5 rounded-xl overflow-hidden shadow-xl flex flex-col justify-between hover:scale-[1.01] transition-all"
                       >
                         <div className={`bg-gradient-to-br ${game.iconBg} p-6 flex items-center justify-between relative overflow-hidden`}>
-                          <span className="text-5xl filter drop-shadow-lg z-10">{game.emoji || "🕹️"}</span>
-                          <span className="absolute right-2 bottom-2 bg-brand/95 backdrop-blur px-2.5 py-0.5 rounded text-[9px] font-mono text-black font-bold uppercase tracking-wider">
-                            {game.privacy === "public" ? "Публічна" : "Приватна"}
-                          </span>
+                          <span className="text-5xl filter drop-shadow-lg z-10">{game.emoji}</span>
+                          <div className="absolute right-2 bottom-2 bg-black/60 backdrop-blur px-2.5 py-1 rounded text-[10px] font-mono text-white font-bold tracking-wider">
+                            {game.difficulty} складність
+                          </div>
                         </div>
                         
                         <div className="p-5 flex-1 flex flex-col justify-between gap-4">
                           <div className="space-y-1">
-                            <div className="flex items-center justify-between gap-2">
-                              <h4 className="font-bold text-sm text-white truncate max-w-[180px]" title={game.title}>{game.title}</h4>
-                              <span className="text-[10px] text-gray-400 font-mono shrink-0">by {game.creator}</span>
+                            <div className="flex items-center justify-between">
+                              <h3 className="font-bold text-sm text-white">{game.title}</h3>
+                              <span className="text-[10px] text-gray-400 font-mono">by {game.creator}</span>
                             </div>
-                            <p className="text-[11px] text-gray-400 leading-relaxed line-clamp-2 h-8 overflow-hidden">{game.description}</p>
-                            <div className="text-[9px] text-gray-500 font-mono pt-1">Опубліковано: {game.savedAt}</div>
+                            <p className="text-[11px] text-gray-400 leading-relaxed">{game.description}</p>
                           </div>
 
                           <div className="flex items-center justify-between text-[11px] text-gray-500 font-mono border-t border-white/5 pt-3">
-                            <div className="flex items-center gap-1.5">
-                              {onDeleteCloudGame && (
-                                <button
-                                  onClick={() => onDeleteCloudGame(game.id)}
-                                  className="p-1.5 bg-red-500/10 hover:bg-red-500 hover:text-white text-red-400 border border-red-500/20 rounded transition-all cursor-pointer"
-                                  title="Видалити з хмари Roblox Cloud"
-                                >
-                                  <Trash2 className="w-3.5 h-3.5" />
-                                </button>
-                              )}
-                              {onEditCloudGame && (
-                                <button
-                                  onClick={() => onEditCloudGame(game)}
-                                  className="p-1.5 bg-brand/10 hover:bg-brand hover:text-black text-brand border border-brand/20 rounded transition-all cursor-pointer font-sans text-[10px] font-bold flex items-center gap-1"
-                                  title="Продовжити редагування у Roblox Studio"
-                                >
-                                  <Wrench className="w-3 h-3" />
-                                  <span>СТУДІЯ</span>
-                                </button>
-                              )}
+                            <div className="flex items-center gap-3">
+                              <span className="flex items-center gap-1 text-[#00FF88]">👍 {game.likes}</span>
+                              <span className="flex items-center gap-1 text-gray-400">👤 {game.playersCount} онлайн</span>
                             </div>
                             
                             <button
+                              id={`game-play-btn-${game.id}`}
                               onClick={() => onPlayPremadeGame(game)}
-                              className="px-3.5 py-1.5 bg-[#00FF88] hover:bg-[#00dd77] text-black font-bold rounded flex items-center gap-1 cursor-pointer font-sans transition-all text-[11px] hover:scale-105 active:scale-95"
+                              className="px-4 py-1.5 bg-[#00FF88] hover:bg-[#00dd77] text-black font-bold rounded flex items-center gap-1 cursor-pointer font-sans transition-all text-[11px] hover:scale-105 active:scale-95"
                             >
                               <Play className="w-3 h-3 fill-black text-black" />
-                              <span>ГРАТИ (PLAY)</span>
+                              <span>Грати (Play)</span>
                             </button>
                           </div>
                         </div>
                       </div>
                     ))}
                   </div>
-                )}
-              </div>
+                </div>
+              )}
+
+              {/* Roblox Cloud Tab */}
+              {gamesTab === "cloud" && (
+                <div className="space-y-4">
+                  <div className="bg-[#12151b] border border-brand/20 p-4 rounded-xl space-y-1">
+                    <h3 className="text-xs font-bold text-brand uppercase tracking-wider font-mono">Сховище Roblox Cloud</h3>
+                    <p className="text-[10px] text-gray-400">
+                      Тут назавжди зберігаються всі ваші приватні та публічні проекти. Згідно з правилами безпеки Roblox, деякі проекти проходять автоматичну систему модерації на підозрілі Luau скрипти або шкідливі блоки (Killbricks).
+                    </p>
+                  </div>
+
+                  {cloudGames.length === 0 ? (
+                    <div className="bg-[#12151b]/40 border border-dashed border-white/10 p-12 rounded-xl text-center space-y-3">
+                      <p className="text-xs text-gray-400">У хмарі Roblox Cloud поки що немає завантажених вами ігор.</p>
+                      <button
+                        onClick={onStartStudio}
+                        className="px-5 py-2 bg-brand hover:bg-brand-bright text-black font-bold text-[10px] uppercase tracking-wider rounded transition-all cursor-pointer font-sans shadow-md"
+                      >
+                        Опублікувати першу гру з Roblox Studio ⚒️
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      {cloudGames.map((game: any) => {
+                        const scanResult = scannedGames[game.id];
+                        const isScanning = moderationScanId === game.id;
+
+                        return (
+                          <div 
+                            key={game.id} 
+                            className="bg-[#12151b] border border-brand/10 rounded-xl overflow-hidden shadow-xl flex flex-col justify-between hover:border-brand/30 transition-all relative group"
+                          >
+                            <div className={`bg-gradient-to-br ${game.iconBg} p-5 flex items-center justify-between relative overflow-hidden`}>
+                              <span className="text-5xl filter drop-shadow-lg z-10">{game.emoji || "🕹️"}</span>
+                              <div className="flex flex-col items-end gap-1.5 z-10">
+                                <span className="bg-brand/95 backdrop-blur px-2 py-0.5 rounded text-[8px] font-mono text-black font-bold uppercase tracking-wider shadow-sm">
+                                  {game.privacy === "public" ? "Публічна" : "Приватна"}
+                                </span>
+                                
+                                {/* Moderation Badge */}
+                                {isScanning ? (
+                                  <span className="bg-amber-500/20 text-amber-300 border border-amber-500/30 px-2 py-0.5 rounded text-[8px] font-mono font-bold uppercase animate-pulse">
+                                    🔄 Скан...
+                                  </span>
+                                ) : scanResult ? (
+                                  scanResult.status === "approved" ? (
+                                    <span className="bg-[#00FF88]/20 text-[#00FF88] border border-[#00FF88]/30 px-2 py-0.5 rounded text-[8px] font-mono font-bold uppercase shadow-sm">
+                                      ✅ Безпечна
+                                    </span>
+                                  ) : (
+                                    <span className="bg-red-500/20 text-red-300 border border-red-500/30 px-2 py-0.5 rounded text-[8px] font-mono font-bold uppercase shadow-sm">
+                                      ⚠️ Підозріла
+                                    </span>
+                                  )
+                                ) : (
+                                  <span className="bg-gray-500/20 text-gray-300 border border-gray-500/30 px-2 py-0.5 rounded text-[8px] font-mono font-bold uppercase">
+                                    🔍 Не перевірено
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+                            
+                            <div className="p-5 flex-1 flex flex-col justify-between gap-4">
+                              <div className="space-y-2">
+                                <div className="flex items-center justify-between gap-2">
+                                  <h4 className="font-bold text-sm text-white truncate max-w-[170px]" title={game.title}>{game.title}</h4>
+                                  <span className="text-[10px] text-gray-400 font-mono shrink-0">by {game.creator}</span>
+                                </div>
+                                <p className="text-[11px] text-gray-400 leading-relaxed line-clamp-2 h-8 overflow-hidden">{game.description}</p>
+                                <div className="text-[9px] text-gray-500 font-mono">Збережено в хмару: {game.savedAt}</div>
+
+                                {/* Scanned Details Alert Box */}
+                                {scanResult && scanResult.status === "suspicious" && (
+                                  <div className="bg-red-500/5 border border-red-500/15 p-2 rounded-lg space-y-1 mt-2">
+                                    <span className="text-[9px] font-bold text-red-400 uppercase tracking-wider block font-mono">⚠️ Звіт модератора:</span>
+                                    {scanResult.reasons.slice(0, 2).map((reason, idx) => (
+                                      <p key={idx} className="text-[9px] text-gray-300">• {reason}</p>
+                                    ))}
+                                  </div>
+                                )}
+                              </div>
+
+                              <div className="flex items-center justify-between text-[11px] text-gray-500 font-mono border-t border-white/5 pt-3">
+                                <div className="flex items-center gap-1.5">
+                                  {onDeleteCloudGame && (
+                                    <button
+                                      onClick={() => onDeleteCloudGame(game.id)}
+                                      className="p-1.5 bg-red-500/10 hover:bg-red-500 hover:text-white text-red-400 border border-red-500/20 rounded transition-all cursor-pointer"
+                                      title="Видалити з хмари"
+                                    >
+                                      <Trash2 className="w-3.5 h-3.5" />
+                                    </button>
+                                  )}
+                                  
+                                  {/* Moderation trigger button */}
+                                  <button
+                                    onClick={() => runModerationScan(game.id, game.title, game.description, game.parts || [])}
+                                    disabled={isScanning}
+                                    className={`p-1.5 rounded border transition-all cursor-pointer text-[10px] font-bold font-sans ${
+                                      isScanning 
+                                        ? "bg-amber-500/20 text-amber-400 border-amber-500/30" 
+                                        : "bg-blue-500/10 hover:bg-blue-500 hover:text-white text-blue-400 border-blue-500/20"
+                                    }`}
+                                    title="Запустити перевірку коду та тригерів"
+                                  >
+                                    🔍 Скан
+                                  </button>
+
+                                  {onEditCloudGame && (
+                                    <button
+                                      onClick={() => onEditCloudGame(game)}
+                                      className="p-1.5 bg-brand/10 hover:bg-brand hover:text-black text-brand border border-brand/20 rounded transition-all cursor-pointer font-sans text-[10px] font-bold flex items-center gap-1"
+                                      title="Завантажити у Roblox Studio"
+                                    >
+                                      <Wrench className="w-3 h-3" />
+                                      <span>РЕДАКТОР</span>
+                                    </button>
+                                  )}
+                                </div>
+                                
+                                <button
+                                  onClick={() => onPlayPremadeGame(game)}
+                                  className="px-3.5 py-1.5 bg-[#00FF88] hover:bg-[#00dd77] text-black font-bold rounded flex items-center gap-1 cursor-pointer font-sans transition-all text-[11px] hover:scale-105 active:scale-95 animate-pulse"
+                                >
+                                  <Play className="w-3 h-3 fill-black text-black" />
+                                  <span>ГРАТИ (PLAY)</span>
+                                </button>
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* AI Game Generator Tab */}
+              {gamesTab === "ai" && (
+                <div className="space-y-4 animate-fade-in">
+                  <div className="bg-[#12151b] border border-amber-500/20 p-5 rounded-xl space-y-3 relative overflow-hidden">
+                    <div className="absolute right-0 top-0 translate-x-4 -translate-y-4 w-32 h-32 bg-amber-500/5 rounded-full blur-xl pointer-events-none" />
+                    
+                    <div className="flex items-center gap-2">
+                      <Sparkles className="w-5 h-5 text-amber-400" />
+                      <h3 className="text-sm font-black text-white uppercase tracking-wider font-mono">Генерація гри штучним інтелектом</h3>
+                    </div>
+                    <p className="text-xs text-gray-400 leading-relaxed">
+                      Опишіть ідею вашої майбутньої гри Roblox українською або англійською мовою. Наш інтегрований AI (Gemini 1.5 Flash) автоматично спроектує гру, підготує розширену тривимірну карту деталей, задасть фізику, спавни, чекпоінти, та додасть Luau скрипти для інтерактивності!
+                    </p>
+                  </div>
+
+                  <form onSubmit={handleGenerateAIGame} className="bg-[#12151b] border border-white/5 p-6 rounded-xl space-y-4">
+                    <div className="space-y-1.5">
+                      <label className="text-[10px] text-gray-400 font-mono font-bold uppercase tracking-wider block">Опишіть світ, перешкоди чи сценарій:</label>
+                      <textarea
+                        value={aiGamePrompt}
+                        onChange={(e) => setAiGamePrompt(e.target.value)}
+                        placeholder="Наприклад: 'Неоновий паркур у хмарах з великою кількістю батутів, рухомих платформ та смертельною лавою червоного кольору'"
+                        className="w-full h-24 bg-[#171a21] border border-white/10 rounded-lg p-3 text-xs text-white focus:outline-none focus:border-amber-400 transition-all resize-none"
+                        disabled={isGeneratingGame}
+                      />
+                    </div>
+
+                    {generatedGameSuccess && (
+                      <div className="bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 text-xs py-3 px-4 rounded-lg">
+                        {generatedGameSuccess}
+                      </div>
+                    )}
+
+                    {generatedGameError && (
+                      <div className="bg-red-500/10 border border-red-500/30 text-red-400 text-xs py-3 px-4 rounded-lg">
+                        {generatedGameError}
+                      </div>
+                    )}
+
+                    <div className="flex justify-end pt-2">
+                      <button
+                        type="submit"
+                        disabled={isGeneratingGame || !aiGamePrompt.trim()}
+                        className={`px-5 py-2.5 rounded-lg text-xs font-bold font-sans flex items-center gap-2 transition-all hover:scale-105 active:scale-95 cursor-pointer ${
+                          isGeneratingGame 
+                            ? "bg-amber-500/20 text-amber-500 border border-amber-500/30 cursor-not-allowed" 
+                            : !aiGamePrompt.trim()
+                            ? "bg-zinc-800 text-zinc-500 border border-zinc-700/50 cursor-not-allowed"
+                            : "bg-amber-400 hover:bg-amber-300 text-black shadow-md shadow-amber-500/10"
+                        }`}
+                      >
+                        {isGeneratingGame ? (
+                          <>
+                            <span className="w-3.5 h-3.5 rounded-full border-2 border-amber-400 border-t-transparent animate-spin" />
+                            <span>Проектування світу AI...</span>
+                          </>
+                        ) : (
+                          <>
+                            <Sparkles className="w-4 h-4" />
+                            <span>Згенерувати гру</span>
+                          </>
+                        )}
+                      </button>
+                    </div>
+                  </form>
+                </div>
+              )}
             </div>
           )}
 
@@ -767,6 +1625,18 @@ export default function MainMenu({
                 </div>
 
                 <div className="flex items-center gap-2.5">
+                  <button
+                    onClick={() => {
+                      setAiModalTab("skin");
+                      setShowAISkinModal(true);
+                    }}
+                    className="px-3.5 py-1.5 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-black font-black text-xs rounded transition-all flex items-center gap-1.5 cursor-pointer shadow-lg shadow-amber-500/20 hover:scale-105"
+                    title="Згенерувати скін чи одяг за допомогою штучного інтелекту"
+                  >
+                    <Sparkles className="w-3.5 h-3.5 animate-pulse" />
+                    <span>AI Генератор 🤖</span>
+                  </button>
+
                   <button
                     onClick={handleResetAvatar}
                     className="px-3.5 py-1.5 bg-white/5 hover:bg-white/10 text-white font-bold text-xs rounded transition-all flex items-center gap-1.5 cursor-pointer border border-white/10"
@@ -1332,7 +2202,7 @@ export default function MainMenu({
                       <div className="space-y-3">
                         <span className="text-[10px] text-gray-400 font-bold uppercase tracking-wider block font-mono">Оберіть капелюхи та аксесуари</span>
                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                          {HATS.map((h) => (
+                          {allHats.map((h) => (
                             <button
                               key={h.id}
                               onClick={() => setAvatarConfig((prev) => ({ ...prev, hat: h.id }))}
@@ -1367,7 +2237,7 @@ export default function MainMenu({
                       <div className="space-y-3">
                         <span className="text-[10px] text-gray-400 font-bold uppercase tracking-wider block font-mono">Оберіть сорочку розробника</span>
                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                          {SHIRTS.map((s) => (
+                          {allShirts.map((s) => (
                             <button
                               key={s.id}
                               onClick={() => setAvatarConfig((prev) => ({ ...prev, shirt: s.id }))}
@@ -1402,7 +2272,7 @@ export default function MainMenu({
                       <div className="space-y-3">
                         <span className="text-[10px] text-gray-400 font-bold uppercase tracking-wider block font-mono">Оберіть штани чи низький одяг</span>
                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                          {PANTS.map((p) => (
+                          {allPants.map((p) => (
                             <button
                               key={p.id}
                               onClick={() => setAvatarConfig((prev) => ({ ...prev, pants: p.id }))}
@@ -1437,7 +2307,7 @@ export default function MainMenu({
                       <div className="space-y-3">
                         <span className="text-[10px] text-gray-400 font-bold uppercase tracking-wider block font-mono">Оберіть аксесуар на спину</span>
                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                          {BACKS.map((b) => (
+                          {allBacks.map((b) => (
                             <button
                               key={b.id}
                               onClick={() => setAvatarConfig((prev) => ({ ...prev, back: b.id }))}
@@ -1497,6 +2367,467 @@ export default function MainMenu({
                 </div>
 
               </div>
+
+            </div>
+          )}
+
+          {/* ================== CATALOG (SHOP) TAB ================== */}
+          {activeTab === "Catalog" && (
+            <div className="max-w-4xl space-y-6 animate-fade-in" id="tab-content-catalog">
+              <div className="border-b border-white/5 pb-4 flex items-center justify-between">
+                <div>
+                  <h2 className="text-xl font-black">Магазин одягу та аксесуарів (Roblox Catalog)</h2>
+                  <p className="text-xs text-gray-400">Купуйте ексклюзивні речі за Robux та екіпіруйте їх у Редакторі Аватара!</p>
+                </div>
+                <div className="flex items-center gap-3">
+                  <button
+                    onClick={() => {
+                      setAiModalTab("clothing");
+                      setShowAISkinModal(true);
+                    }}
+                    className="bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-black px-3.5 py-1.5 rounded-lg text-xs font-black flex items-center gap-1.5 cursor-pointer shadow-lg hover:scale-105 transition-all"
+                    title="Створити власний UGC одяг за допомогою штучного інтелекту"
+                  >
+                    <Sparkles className="w-4 h-4 animate-pulse" />
+                    <span>AI UGC Дизайнер 🎨</span>
+                  </button>
+                  <div className="bg-amber-400/10 text-amber-400 border border-amber-400/25 px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-2">
+                    <Crown className="w-4 h-4" />
+                    <span>Прихований Преміум: Необмежено</span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Catalog Notifications */}
+              {catalogNotification && (
+                <div className="bg-[#00FF88]/15 border border-[#00FF88]/30 text-white text-xs px-4 py-3 rounded-xl flex items-center justify-between animate-bounce">
+                  <span>{catalogNotification}</span>
+                  <span className="text-[10px] bg-[#00FF88]/20 text-[#00FF88] px-1.5 py-0.5 rounded font-bold uppercase font-mono">Успішно</span>
+                </div>
+              )}
+
+              {/* Items Catalog Grid */}
+              <div className="space-y-6">
+                <div>
+                  <h3 className="font-bold text-xs text-gray-400 font-mono tracking-wider uppercase mb-3">ДОСТУПНІ ПРЕДМЕТИ</h3>
+                  
+                  {/* Category grids */}
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                    {/* Hats Category */}
+                    {allHats.filter(h => h.id !== "none").map(hat => {
+                      const isOwned = ownedItems.includes(hat.id);
+                      // Define mock prices for premium catalog items
+                      const price = hat.rarity === "Legendary" ? 500 : hat.rarity === "Epic" ? 150 : hat.rarity === "Rare" ? 50 : 0;
+                      
+                      return (
+                        <div key={hat.id} className="bg-[#12151b] border border-white/5 rounded-xl p-4 flex flex-col justify-between gap-4 hover:border-brand/30 transition-all">
+                          <div className="flex items-start justify-between">
+                            <div className="w-12 h-12 bg-black/40 rounded-xl flex items-center justify-center text-3xl border border-white/5">
+                              {hat.emoji}
+                            </div>
+                            <span className={`text-[8px] font-mono px-2 py-0.5 rounded uppercase font-bold ${
+                              hat.rarity === "Legendary" ? "bg-red-500/10 text-red-400" :
+                              hat.rarity === "Epic" ? "bg-purple-500/10 text-purple-400" :
+                              hat.rarity === "Rare" ? "bg-blue-500/10 text-blue-400" :
+                              "bg-gray-500/10 text-gray-400"
+                            }`}>
+                              {hat.rarity}
+                            </span>
+                          </div>
+
+                          <div className="space-y-1">
+                            <h4 className="font-bold text-xs text-white">{hat.name}</h4>
+                            <p className="text-[10px] text-gray-500">Аксесуар: Головний убір</p>
+                          </div>
+
+                          <div className="border-t border-white/5 pt-3 flex items-center justify-between">
+                            <span className="text-xs font-mono font-bold text-amber-400 flex items-center gap-0.5">
+                              🪙 {price === 0 ? "Безкоштовно" : `${price} R$`}
+                            </span>
+
+                            {isOwned ? (
+                              <span className="bg-white/5 text-gray-400 border border-white/10 px-3 py-1.5 rounded text-[10px] font-bold">
+                                Куплено ✅
+                              </span>
+                            ) : (
+                              <button
+                                onClick={() => buyItem(hat.id, price, hat.name)}
+                                className="px-3 py-1.5 bg-brand hover:bg-brand-bright text-black font-bold rounded text-[10px] cursor-pointer transition-all hover:scale-105 active:scale-95"
+                              >
+                                Придбати 🛒
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
+
+                    {/* Shirts Category */}
+                    {allShirts.filter(s => s.id !== "none").map(shirt => {
+                      const isOwned = ownedItems.includes(shirt.id);
+                      const price = shirt.rarity === "Legendary" ? 400 : shirt.rarity === "Epic" ? 100 : shirt.rarity === "Rare" ? 40 : 0;
+
+                      return (
+                        <div key={shirt.id} className="bg-[#12151b] border border-white/5 rounded-xl p-4 flex flex-col justify-between gap-4 hover:border-brand/30 transition-all">
+                          <div className="flex items-start justify-between">
+                            <div className="w-12 h-12 bg-black/40 rounded-xl flex items-center justify-center text-3xl border border-white/5">
+                              {shirt.emoji}
+                            </div>
+                            <span className={`text-[8px] font-mono px-2 py-0.5 rounded uppercase font-bold ${
+                              shirt.rarity === "Legendary" ? "bg-red-500/10 text-red-400" :
+                              shirt.rarity === "Epic" ? "bg-purple-500/10 text-purple-400" :
+                              shirt.rarity === "Rare" ? "bg-blue-500/10 text-blue-400" :
+                              "bg-gray-500/10 text-gray-400"
+                            }`}>
+                              {shirt.rarity}
+                            </span>
+                          </div>
+
+                          <div className="space-y-1">
+                            <h4 className="font-bold text-xs text-white">{shirt.name}</h4>
+                            <p className="text-[10px] text-gray-500">Аксесуар: Верхній одяг</p>
+                          </div>
+
+                          <div className="border-t border-white/5 pt-3 flex items-center justify-between">
+                            <span className="text-xs font-mono font-bold text-amber-400 flex items-center gap-0.5">
+                              🪙 {price === 0 ? "Безкоштовно" : `${price} R$`}
+                            </span>
+
+                            {isOwned ? (
+                              <span className="bg-white/5 text-gray-400 border border-white/10 px-3 py-1.5 rounded text-[10px] font-bold">
+                                Куплено ✅
+                              </span>
+                            ) : (
+                              <button
+                                onClick={() => buyItem(shirt.id, price, shirt.name)}
+                                className="px-3 py-1.5 bg-brand hover:bg-brand-bright text-black font-bold rounded text-[10px] cursor-pointer transition-all hover:scale-105 active:scale-95"
+                              >
+                                Придбати 🛒
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
+
+                    {/* Pants Category */}
+                    {allPants.filter(p => p.id !== "none").map(pants => {
+                      const isOwned = ownedItems.includes(pants.id);
+                      const price = pants.rarity === "Legendary" ? 300 : pants.rarity === "Epic" ? 80 : pants.rarity === "Rare" ? 30 : 0;
+
+                      return (
+                        <div key={pants.id} className="bg-[#12151b] border border-white/5 rounded-xl p-4 flex flex-col justify-between gap-4 hover:border-brand/30 transition-all">
+                          <div className="flex items-start justify-between">
+                            <div className="w-12 h-12 bg-black/40 rounded-xl flex items-center justify-center text-3xl border border-white/5">
+                              {pants.emoji}
+                            </div>
+                            <span className={`text-[8px] font-mono px-2 py-0.5 rounded uppercase font-bold ${
+                              pants.rarity === "Legendary" ? "bg-red-500/10 text-red-400" :
+                              pants.rarity === "Epic" ? "bg-purple-500/10 text-purple-400" :
+                              pants.rarity === "Rare" ? "bg-blue-500/10 text-blue-400" :
+                              "bg-gray-500/10 text-gray-400"
+                            }`}>
+                              {pants.rarity}
+                            </span>
+                          </div>
+
+                          <div className="space-y-1">
+                            <h4 className="font-bold text-xs text-white">{pants.name}</h4>
+                            <p className="text-[10px] text-gray-500">Аксесуар: Штани та взуття</p>
+                          </div>
+
+                          <div className="border-t border-white/5 pt-3 flex items-center justify-between">
+                            <span className="text-xs font-mono font-bold text-amber-400 flex items-center gap-0.5">
+                              🪙 {price === 0 ? "Безкоштовно" : `${price} R$`}
+                            </span>
+
+                            {isOwned ? (
+                              <span className="bg-white/5 text-gray-400 border border-white/10 px-3 py-1.5 rounded text-[10px] font-bold">
+                                Куплено ✅
+                              </span>
+                            ) : (
+                              <button
+                                onClick={() => buyItem(pants.id, price, pants.name)}
+                                className="px-3 py-1.5 bg-brand hover:bg-brand-bright text-black font-bold rounded text-[10px] cursor-pointer transition-all hover:scale-105 active:scale-95"
+                              >
+                                Придбати 🛒
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
+
+                    {/* Back Category */}
+                    {allBacks.filter(b => b.id !== "none").map(back => {
+                      const isOwned = ownedItems.includes(back.id);
+                      const price = back.rarity === "Legendary" ? 500 : back.rarity === "Epic" ? 120 : back.rarity === "Rare" ? 50 : 0;
+
+                      return (
+                        <div key={back.id} className="bg-[#12151b] border border-white/5 rounded-xl p-4 flex flex-col justify-between gap-4 hover:border-brand/30 transition-all">
+                          <div className="flex items-start justify-between">
+                            <div className="w-12 h-12 bg-black/40 rounded-xl flex items-center justify-center text-3xl border border-white/5">
+                              {back.emoji}
+                            </div>
+                            <span className={`text-[8px] font-mono px-2 py-0.5 rounded uppercase font-bold ${
+                              back.rarity === "Legendary" ? "bg-red-500/10 text-red-400" :
+                              back.rarity === "Epic" ? "bg-purple-500/10 text-purple-400" :
+                              back.rarity === "Rare" ? "bg-blue-500/10 text-blue-400" :
+                              "bg-gray-500/10 text-gray-400"
+                            }`}>
+                              {back.rarity}
+                            </span>
+                          </div>
+
+                          <div className="space-y-1">
+                            <h4 className="font-bold text-xs text-white">{back.name}</h4>
+                            <p className="text-[10px] text-gray-500">Аксесуар: Предмет на спину</p>
+                          </div>
+
+                          <div className="border-t border-white/5 pt-3 flex items-center justify-between">
+                            <span className="text-xs font-mono font-bold text-amber-400 flex items-center gap-0.5">
+                              🪙 {price === 0 ? "Безкоштовно" : `${price} R$`}
+                            </span>
+
+                            {isOwned ? (
+                              <span className="bg-white/5 text-gray-400 border border-white/10 px-3 py-1.5 rounded text-[10px] font-bold">
+                                Куплено ✅
+                              </span>
+                            ) : (
+                              <button
+                                onClick={() => buyItem(back.id, price, back.name)}
+                                className="px-3 py-1.5 bg-brand hover:bg-brand-bright text-black font-bold rounded text-[10px] cursor-pointer transition-all hover:scale-105 active:scale-95"
+                              >
+                                Придбати 🛒
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* ================== COMMUNITIES TAB ================== */}
+          {activeTab === "Communities" && (
+            <div className="max-w-4xl space-y-6 animate-fade-in" id="tab-content-communities">
+              <div className="border-b border-white/5 pb-4 flex items-center justify-between">
+                <div>
+                  <h2 className="text-xl font-black">Спільноти та Клуби (Roblox Communities)</h2>
+                  <p className="text-xs text-gray-400 font-sans">Знаходьте клуби розробників, діліться Luau скриптами або створіть власний за 2 Robux!</p>
+                </div>
+                <button
+                  onClick={() => setShowCreateCommunityModal(true)}
+                  className="px-4 py-2 bg-brand hover:bg-brand-bright text-black font-bold text-xs rounded transition-all flex items-center gap-1.5 cursor-pointer shadow-lg hover:scale-105"
+                >
+                  <Plus className="w-4 h-4" />
+                  <span>Створити спільноту (2 R$)</span>
+                </button>
+              </div>
+
+              {/* Shop Notifications */}
+              {catalogNotification && (
+                <div className="bg-[#00FF88]/15 border border-[#00FF88]/30 text-white text-xs px-4 py-3 rounded-xl flex items-center justify-between animate-bounce">
+                  <span>{catalogNotification}</span>
+                  <span className="text-[10px] bg-[#00FF88]/20 text-[#00FF88] px-1.5 py-0.5 rounded font-bold uppercase font-mono">Успішно</span>
+                </div>
+              )}
+
+              {/* Communities list */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {communities.map((com) => {
+                  const isJoined = joinedCommunities.includes(com.id);
+
+                  return (
+                    <div key={com.id} className="bg-[#12151b] border border-white/5 hover:border-brand/20 p-5 rounded-2xl flex flex-col justify-between gap-4 transition-all shadow-xl">
+                      <div className="space-y-2">
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-2.5">
+                            <span className="text-3xl filter drop-shadow">{com.emoji}</span>
+                            <h4 className="font-black text-sm text-white">{com.name}</h4>
+                          </div>
+                          <span className="text-[10px] bg-white/5 text-gray-400 px-2 py-0.5 rounded font-mono">
+                            {com.membersCount} учасників
+                          </span>
+                        </div>
+
+                        <p className="text-xs text-gray-400 leading-relaxed min-h-[40px]">{com.description}</p>
+                        <div className="text-[9px] text-gray-500 font-mono">Засновник спільноти: <span className="text-[#00FF88] font-bold">{com.creator}</span></div>
+                      </div>
+
+                      <div className="border-t border-white/5 pt-3 flex items-center justify-between gap-2">
+                        {/* Discussion wall button */}
+                        <button
+                          onClick={() => setViewingCommunity(com)}
+                          className="px-3.5 py-2 bg-white/5 hover:bg-white/10 text-gray-300 font-bold text-xs rounded transition-all cursor-pointer font-sans"
+                        >
+                          💬 Стіна обговорень
+                        </button>
+
+                        <button
+                          onClick={() => handleJoinCommunity(com.id)}
+                          className={`px-4 py-2 font-bold text-xs rounded transition-all cursor-pointer font-sans hover:scale-105 active:scale-95 ${
+                            isJoined
+                              ? "bg-red-500/10 hover:bg-red-500 text-red-400 hover:text-white border border-red-500/20"
+                              : "bg-[#00FF88] hover:bg-[#00dd77] text-black"
+                          }`}
+                        >
+                          {isJoined ? "Покинути ❌" : "Приєднатись ✅"}
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+
+              {/* View Community Wall Modal inside launcher layout */}
+              {viewingCommunity && (
+                <div className="fixed inset-0 bg-black/75 backdrop-blur-sm z-[99999] flex items-center justify-center p-4">
+                  <div className="bg-[#12151b] border border-brand/20 p-6 rounded-2xl max-w-xl w-full shadow-2xl space-y-4">
+                    <div className="flex items-center justify-between border-b border-white/5 pb-3">
+                      <div className="flex items-center gap-2.5">
+                        <span className="text-3xl">{viewingCommunity.emoji}</span>
+                        <div>
+                          <h3 className="font-black text-base text-white">{viewingCommunity.name}</h3>
+                          <p className="text-[10px] text-gray-400">Стіна обговорень та Luau коди</p>
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setViewingCommunity(null)}
+                        className="w-8 h-8 bg-white/5 hover:bg-red-500/20 hover:text-red-400 rounded-full flex items-center justify-center transition-all cursor-pointer text-gray-400 font-bold"
+                      >
+                        ✕
+                      </button>
+                    </div>
+
+                    {/* Messages Container */}
+                    <div className="space-y-2.5 max-h-[220px] overflow-y-auto bg-black/20 p-3 rounded-xl border border-white/5">
+                      {viewingCommunity.comments.length === 0 ? (
+                        <p className="text-xs text-gray-500 italic text-center py-6">На стіні ще немає коментарів. Будьте першим!</p>
+                      ) : (
+                        viewingCommunity.comments.map((msg: any, idx: number) => (
+                          <div key={idx} className="bg-white/2 hover:bg-white/5 p-2.5 rounded-lg space-y-1 border border-white/2">
+                            <div className="flex items-center justify-between text-[10px] font-mono">
+                              <span className="font-bold text-[#00FF88]">{msg.sender}</span>
+                              <span className="text-gray-500">{msg.time}</span>
+                            </div>
+                            <p className="text-xs text-gray-300 leading-relaxed">{msg.text}</p>
+                          </div>
+                        ))
+                      )}
+                    </div>
+
+                    {/* Post comment form */}
+                    <div className="space-y-2">
+                      <textarea
+                        value={communityComment}
+                        onChange={(e) => setCommunityComment(e.target.value)}
+                        placeholder="Напишіть коментар або Luau скрипт на стіну спільноти..."
+                        rows={2}
+                        className="w-full bg-black/40 border border-white/10 rounded-lg p-2.5 text-xs text-white placeholder-gray-500 focus:outline-none focus:border-brand transition-all resize-none font-sans"
+                      />
+                      <div className="flex justify-end">
+                        <button
+                          type="button"
+                          onClick={(e) => handlePostCommunityComment(e as any, viewingCommunity.id)}
+                          className="px-4 py-1.5 bg-brand hover:bg-brand-bright text-black font-black text-xs rounded transition-all cursor-pointer"
+                        >
+                          Надіслати 🚀
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Create Community Modal */}
+              {showCreateCommunityModal && (
+                <div className="fixed inset-0 bg-black/75 backdrop-blur-sm z-[99999] flex items-center justify-center p-4">
+                  <form 
+                    onSubmit={(e) => {
+                      e.preventDefault();
+                      handleCreateCommunity(e);
+                    }}
+                    className="bg-[#12151b] border border-brand/20 p-6 rounded-2xl max-w-md w-full shadow-2xl space-y-4"
+                  >
+                    <div className="flex items-center justify-between border-b border-white/5 pb-3">
+                      <h3 className="font-black text-sm uppercase tracking-wider text-brand">Створення спільноти (2 R$)</h3>
+                      <button
+                        type="button"
+                        onClick={() => setShowCreateCommunityModal(false)}
+                        className="w-8 h-8 bg-white/5 hover:bg-red-500/20 hover:text-red-400 rounded-full flex items-center justify-center transition-all cursor-pointer text-gray-400 font-bold"
+                      >
+                        ✕
+                      </button>
+                    </div>
+
+                    <div className="space-y-3 text-xs">
+                      <div className="space-y-1">
+                        <label className="text-gray-400 block font-mono">Назва спільноти</label>
+                        <input
+                          type="text"
+                          required
+                          value={newCommunityName}
+                          onChange={(e) => setNewCommunityName(e.target.value)}
+                          placeholder="Наприклад: Roblox Studio Masters"
+                          className="w-full bg-black/40 border border-white/10 rounded-lg p-2.5 text-white focus:outline-none focus:border-brand transition-all"
+                        />
+                      </div>
+
+                      <div className="space-y-1">
+                        <label className="text-gray-400 block font-mono">Опис спільноти</label>
+                        <textarea
+                          value={newCommunityDesc}
+                          onChange={(e) => setNewCommunityDesc(e.target.value)}
+                          placeholder="Опишіть цілі, правила або концепцію спільноти..."
+                          rows={3}
+                          className="w-full bg-black/40 border border-white/10 rounded-lg p-2.5 text-white focus:outline-none focus:border-brand transition-all resize-none"
+                        />
+                      </div>
+
+                      <div className="space-y-1">
+                        <label className="text-gray-400 block font-mono">Емодзі спільноти</label>
+                        <select
+                          value={newCommunityEmoji}
+                          onChange={(e) => setNewCommunityEmoji(e.target.value)}
+                          className="w-full bg-black/40 border border-white/10 rounded-lg p-2.5 text-white focus:outline-none focus:border-brand cursor-pointer"
+                        >
+                          <option value="👥">👥 Люди / Гравці</option>
+                          <option value="💻">💻 Luau Програмісти</option>
+                          <option value="🗼">🗼 Спідраннери Tower of Hell</option>
+                          <option value="🛠️">🛠️ Конструктори Roblox</option>
+                          <option value="🌋">🌋 Виживальники Natural Disaster</option>
+                          <option value="✨">✨ Магія / Ексклюзив</option>
+                        </select>
+                      </div>
+                    </div>
+
+                    <div className="bg-amber-400/10 border border-amber-400/20 p-3 rounded-lg text-[10px] text-gray-300">
+                      Створення спільноти спише **2 Robux** з вашого балансу. Завдяки Прихованому Преміуму платіж пройде миттєво і успішно!
+                    </div>
+
+                    <div className="border-t border-white/5 pt-3 flex justify-end gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setShowCreateCommunityModal(false)}
+                        className="px-4 py-2 bg-white/5 hover:bg-white/10 text-gray-300 text-xs rounded transition-all cursor-pointer"
+                      >
+                        Скасувати
+                      </button>
+                      <button
+                        type="submit"
+                        className="px-4 py-2 bg-brand hover:bg-brand-bright text-black font-black text-xs rounded transition-all cursor-pointer"
+                      >
+                        Створити 🚀
+                      </button>
+                    </div>
+                  </form>
+                </div>
+              )}
 
             </div>
           )}
@@ -1645,6 +2976,287 @@ export default function MainMenu({
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* --- AI GENERATOR STUDIO MODAL --- */}
+      {showAISkinModal && (
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-md z-[10000] flex items-center justify-center p-4">
+          <div className="w-full max-w-xl bg-[#12151b] border-2 border-amber-500/20 rounded-2xl p-6 shadow-2xl text-white relative animate-fade-in">
+            {/* Close Button */}
+            <button
+              onClick={() => {
+                setShowAISkinModal(false);
+                setGeneratedSkinSuccess(false);
+                setGeneratedSkinError(null);
+                setGeneratedClothingSuccess(null);
+                setGeneratedClothingError(null);
+              }}
+              className="absolute top-4 right-4 w-8 h-8 bg-white/5 hover:bg-red-500/20 hover:text-red-400 rounded-full flex items-center justify-center transition-all cursor-pointer text-gray-300 font-bold z-10"
+            >
+              ✕
+            </button>
+
+            {/* Modal Title */}
+            <div className="flex items-center gap-2.5 border-b border-white/5 pb-4">
+              <div className="w-10 h-10 bg-amber-400/10 text-amber-400 border border-amber-400/20 rounded-xl flex items-center justify-center">
+                <Sparkles className="w-5 h-5 animate-pulse" />
+              </div>
+              <div>
+                <h3 className="text-base font-black tracking-tight">AI Roblox Creator Hub 🤖</h3>
+                <p className="text-xs text-gray-400">Генеруйте унікальні образи та лімітований UGC одяг за допомогою штучного інтелекту</p>
+              </div>
+            </div>
+
+            {/* Modal Subtabs */}
+            <div className="flex gap-2 border-b border-white/5 py-3">
+              <button
+                onClick={() => setAiModalTab("skin")}
+                className={`flex-1 py-2 text-xs font-bold rounded-lg border transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
+                  aiModalTab === "skin"
+                    ? "bg-amber-400 text-black font-black border-amber-400"
+                    : "bg-white/2 hover:bg-white/5 text-gray-400 border-transparent"
+                }`}
+              >
+                <UserCheck className="w-3.5 h-3.5" />
+                <span>AI Генератор Скінів 👤</span>
+              </button>
+              <button
+                onClick={() => setAiModalTab("clothing")}
+                className={`flex-1 py-2 text-xs font-bold rounded-lg border transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
+                  aiModalTab === "clothing"
+                    ? "bg-amber-400 text-black font-black border-amber-400"
+                    : "bg-white/2 hover:bg-white/5 text-gray-400 border-transparent"
+                }`}
+              >
+                <Shirt className="w-3.5 h-3.5" />
+                <span>AI Дизайнер Одягу (UGC) 🎨</span>
+              </button>
+            </div>
+
+            {/* TAB CONTENT: SKIN CREATOR */}
+            {aiModalTab === "skin" && (
+              <form onSubmit={handleGenerateAISkin} className="space-y-4 pt-4">
+                <p className="text-xs text-gray-400 leading-relaxed">
+                  Опишіть бажану тему, стиль, фракцію чи характер вашого скіна. AI підбере колір шкіри, вираз обличчя та автоматично одягне вашого персонажа у відповідні аксесуари!
+                </p>
+
+                <div className="space-y-1.5">
+                  <label className="text-[10px] text-gray-400 font-mono font-bold uppercase tracking-wider block">Опишіть вигляд скіна:</label>
+                  <textarea
+                    value={aiSkinPrompt}
+                    onChange={(e) => setAiSkinPrompt(e.target.value)}
+                    placeholder="Наприклад: 'Темний ніндзя кіберпанку з червоними очима, неоновим шоломом та катанами на спині'"
+                    className="w-full h-20 bg-[#171a21] border border-white/10 rounded-lg p-3 text-xs text-white focus:outline-none focus:border-amber-400 transition-all resize-none"
+                    disabled={isGeneratingSkin}
+                  />
+                </div>
+
+                {generatedSkinSuccess && (
+                  <div className="bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 text-xs py-3 px-4 rounded-lg">
+                    🎉 **Скін успішно згенеровано!** Повністю налаштовано колір шкіри, обличчя та аксесуари. Перевірте 3D-аватар на екрані редактора!
+                  </div>
+                )}
+
+                {generatedSkinError && (
+                  <div className="bg-red-500/10 border border-red-500/30 text-red-400 text-xs py-3 px-4 rounded-lg">
+                    ⚠️ {generatedSkinError}
+                  </div>
+                )}
+
+                <div className="flex justify-end gap-2.5 pt-2 border-t border-white/5">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowAISkinModal(false);
+                      setGeneratedSkinSuccess(false);
+                      setGeneratedSkinError(null);
+                    }}
+                    className="px-4 py-2 bg-white/5 hover:bg-white/10 text-white text-xs font-bold rounded-lg cursor-pointer transition-all"
+                  >
+                    Закрити
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={isGeneratingSkin || !aiSkinPrompt.trim()}
+                    className={`px-5 py-2 rounded-lg text-xs font-bold font-sans flex items-center gap-2 transition-all hover:scale-105 active:scale-95 cursor-pointer ${
+                      isGeneratingSkin 
+                        ? "bg-amber-500/20 text-amber-500 border border-amber-500/30 cursor-not-allowed" 
+                        : !aiSkinPrompt.trim()
+                        ? "bg-zinc-800 text-zinc-500 border border-zinc-700/50 cursor-not-allowed"
+                        : "bg-amber-400 hover:bg-amber-300 text-black shadow-md shadow-amber-500/10"
+                    }`}
+                  >
+                    {isGeneratingSkin ? (
+                      <>
+                        <span className="w-3.5 h-3.5 rounded-full border-2 border-amber-400 border-t-transparent animate-spin" />
+                        <span>Конструювання скіна...</span>
+                      </>
+                    ) : (
+                      <>
+                        <Sparkles className="w-4 h-4" />
+                        <span>Згенерувати скін</span>
+                      </>
+                    )}
+                  </button>
+                </div>
+              </form>
+            )}
+
+            {/* TAB CONTENT: CLOTHING DESIGNER */}
+            {aiModalTab === "clothing" && (
+              <form onSubmit={handleGenerateAIClothing} className="space-y-4 pt-4">
+                <p className="text-xs text-gray-400 leading-relaxed">
+                  Створюйте власні лімітовані речі для Roblox магазину! Опишіть дизайн предмета, і штучний інтелект додасть нову річ до каталогу та вашого гардероба.
+                </p>
+
+                <div className="space-y-1.5">
+                  <label className="text-[10px] text-gray-400 font-mono font-bold uppercase tracking-wider block">Опишіть дизайн вашого UGC предмета:</label>
+                  <textarea
+                    value={aiClothingPrompt}
+                    onChange={(e) => setAiClothingPrompt(e.target.value)}
+                    placeholder="Наприклад: 'Магічний вогняний шолом дракона, що палає яскраво-оранжевим світлом'"
+                    className="w-full h-20 bg-[#171a21] border border-white/10 rounded-lg p-3 text-xs text-white focus:outline-none focus:border-amber-400 transition-all resize-none"
+                    disabled={isGeneratingClothing}
+                  />
+                </div>
+
+                {generatedClothingSuccess && (
+                  <div className="bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 text-xs py-3 px-4 rounded-lg">
+                    🎨 **UGC річ успішно створена!** Предмет додано у вашу колекцію, Магазин Каталогу та Редактор Аватарів. Можете екіпірувати її прямо зараз!
+                  </div>
+                )}
+
+                {generatedClothingError && (
+                  <div className="bg-red-500/10 border border-red-500/30 text-red-400 text-xs py-3 px-4 rounded-lg">
+                    ⚠️ {generatedClothingError}
+                  </div>
+                )}
+
+                <div className="flex justify-end gap-2.5 pt-2 border-t border-white/5">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowAISkinModal(false);
+                      setGeneratedClothingSuccess(null);
+                      setGeneratedClothingError(null);
+                    }}
+                    className="px-4 py-2 bg-white/5 hover:bg-white/10 text-white text-xs font-bold rounded-lg cursor-pointer transition-all"
+                  >
+                    Закрити
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={isGeneratingClothing || !aiClothingPrompt.trim()}
+                    className={`px-5 py-2 rounded-lg text-xs font-bold font-sans flex items-center gap-2 transition-all hover:scale-105 active:scale-95 cursor-pointer ${
+                      isGeneratingClothing 
+                        ? "bg-amber-500/20 text-amber-500 border border-amber-500/30 cursor-not-allowed" 
+                        : !aiClothingPrompt.trim()
+                        ? "bg-zinc-800 text-zinc-500 border border-zinc-700/50 cursor-not-allowed"
+                        : "bg-amber-400 hover:bg-amber-300 text-black shadow-md shadow-amber-500/10"
+                    }`}
+                  >
+                    {isGeneratingClothing ? (
+                      <>
+                        <span className="w-3.5 h-3.5 rounded-full border-2 border-amber-400 border-t-transparent animate-spin" />
+                        <span>Швейний цех AI...</span>
+                      </>
+                    ) : (
+                      <>
+                        <Sparkles className="w-4 h-4" />
+                        <span>Створити предмет одягу</span>
+                      </>
+                    )}
+                  </button>
+                </div>
+              </form>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* ================== FRIEND/USER PROFILE MODAL ================== */}
+      {selectedProfile && (
+        <div className="fixed inset-0 bg-black/85 backdrop-blur-md z-[99999] flex items-center justify-center p-4">
+          <div className="bg-[#12151b] border border-brand/30 p-6 rounded-2xl max-w-lg w-full shadow-2xl space-y-5">
+            {/* Header / Top banner */}
+            <div className="relative bg-gradient-to-r from-brand/25 to-[#00FF88]/10 p-5 rounded-xl border border-white/5 flex items-center gap-4">
+              <div className="w-16 h-16 bg-[#1a1f29] border-2 border-brand rounded-full flex items-center justify-center text-3xl shadow-lg">
+                {selectedProfile.avatar}
+              </div>
+              <div className="space-y-1">
+                <div className="flex items-center gap-1.5">
+                  <h3 className="font-black text-sm text-white">{selectedProfile.name}</h3>
+                  <span className="bg-amber-400/20 text-amber-400 border border-amber-400/30 px-1.5 py-0.2 rounded text-[8px] font-mono font-black uppercase">Offline</span>
+                </div>
+                <p className="text-[10px] text-brand font-mono">ID: {selectedProfile.id}</p>
+                <div className="text-[10px] text-gray-400 italic">"{selectedProfile.statusText}"</div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setSelectedProfile(null)}
+                className="absolute top-3 right-3 w-8 h-8 bg-white/5 hover:bg-red-500/20 hover:text-red-400 rounded-full flex items-center justify-center transition-all cursor-pointer text-gray-300 font-bold"
+              >
+                ✕
+              </button>
+            </div>
+
+            {/* Profile Bio */}
+            <div className="space-y-1.5">
+              <span className="text-[10px] text-gray-400 font-bold uppercase font-mono block">Про себе (About me)</span>
+              <p className="text-xs text-gray-300 leading-relaxed bg-black/40 border border-white/5 p-3 rounded-xl font-sans">
+                {selectedProfile.bio || "Цей гравець вирішив залишити свій опис секретним..."}
+              </p>
+            </div>
+
+            {/* Created Games & Contributions */}
+            <div className="space-y-2">
+              <span className="text-[10px] text-gray-400 font-bold uppercase font-mono block">Проекти користувача (Created Games)</span>
+              <div className="bg-black/20 border border-white/5 p-3 rounded-xl flex items-center justify-between gap-2 hover:border-brand/20 transition-all">
+                <div className="flex items-center gap-2.5">
+                  <span className="text-2xl">🎮</span>
+                  <div>
+                    <h4 className="font-bold text-xs text-white">{selectedProfile.createdGame || "My Cool Parkour Obby"}</h4>
+                    <span className="text-[9px] text-gray-500 font-mono">Останнє оновлення: 2 дні тому</span>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSelectedProfile(null);
+                    setActiveTab("Games");
+                    setCatalogNotification(`🎮 Перейдіть у вкладку "Грати в ігри", щоб протестувати проекти спільноти!`);
+                    setTimeout(() => setCatalogNotification(null), 4000);
+                  }}
+                  className="px-3 py-1 bg-[#00FF88] hover:bg-[#00dd77] text-black font-bold text-[10px] rounded transition-all cursor-pointer"
+                >
+                  Грати 🚀
+                </button>
+              </div>
+            </div>
+
+            {/* Link navigation */}
+            <div className="space-y-1.5 border-t border-white/5 pt-3">
+              <span className="text-[10px] text-gray-400 font-bold uppercase font-mono block">Посилання у профілі (Profile Link)</span>
+              <a 
+                href="#profile-url"
+                onClick={(e) => {
+                  e.preventDefault();
+                  setCatalogNotification(`🔗 Ви перейшли за зовнішнім посиланням: ${selectedProfile.url || "https://roblox.com/users/" + selectedProfile.id}`);
+                  setTimeout(() => setCatalogNotification(null), 3000);
+                }}
+                className="text-brand hover:underline text-xs flex items-center gap-1 font-mono cursor-pointer"
+              >
+                <LinkIcon className="w-3.5 h-3.5" />
+                <span>{selectedProfile.url || `roblox.com/users/${selectedProfile.id}`}</span>
+              </a>
+            </div>
+
+            {/* Bottom Status text */}
+            <p className="text-[9px] text-gray-500 italic text-center font-mono">
+              «Зараз гравець не в мережі. Завтра він обов'язково зайде знову!»
+            </p>
           </div>
         </div>
       )}

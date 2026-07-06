@@ -1,0 +1,24 @@
+{
+  "name": "Roblox Studio Online",
+  "short_name": "RStudio Online",
+  "description": "Інтерактивне та креативне середовище розробника з 3D симуляцією",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#0A0A0A",
+  "theme_color": "#00FF88",
+  "orientation": "any",
+  "icons": [
+    {
+      "src": "/logo512.jpg",
+      "type": "image/jpeg",
+      "sizes": "192x192",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/logo512.jpg",
+      "type": "image/jpeg",
+      "sizes": "512x512",
+      "purpose": "any maskable"
+    }
+  ]
+}

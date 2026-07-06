@@ -32,6 +32,11 @@ export default function App() {
   const [selectedScriptId, setSelectedScriptId] = useState<string | null>("script-welcome");
   const [activeScriptCode, setActiveScriptCode] = useState<string>(LUA_TEMPLATES[0].code);
   const [activeRibbonTab, setActiveRibbonTab] = useState<ActiveRibbonTab>("Home");
+  
+  // Real-time multiplayer server states
+  const [activeRoomId, setActiveRoomId] = useState<string>("studio-test");
+  const [currentGameTitle, setCurrentGameTitle] = useState<string>("Roblox Studio Test Server");
+
   const [logs, setLogs] = useState<ConsoleLog[]>([
     {
       id: "init",
@@ -764,13 +769,16 @@ export default function App() {
           setActiveView("studio");
           setIsTesting(false);
         }}
-        onPlayPremadeGame={(game) => {
+        onPlayPremadeGame={(game, customRoomId) => {
           setParts(game.parts);
+          setActiveRoomId(customRoomId || game.id);
+          setCurrentGameTitle(game.title);
           setIsTesting(true);
           setActiveView("play");
         }}
         cloudGames={cloudGames}
         onDeleteCloudGame={handleDeleteCloudGame}
+        onSaveCloudGame={handleSaveCloudGame}
         onEditCloudGame={(game) => {
           setParts(game.parts);
           setActiveView("studio");
@@ -791,6 +799,8 @@ export default function App() {
           parts={parts} 
           vcVolume={vcVolume}
           onVcVolumeChange={handleVcVolumeChange}
+          activeRoomId={activeRoomId}
+          currentGameTitle={currentGameTitle}
           onLeaveGame={() => {
             setIsTesting(false);
             if (activeView === "play") {
@@ -886,6 +896,8 @@ export default function App() {
           onVcVolumeChange={handleVcVolumeChange}
           onPublishGame={handlePublishGame}
           onStartTesting={() => {
+            setActiveRoomId("studio-test");
+            setCurrentGameTitle("Roblox Studio Test Server");
             setIsTesting(true);
             addLog("Початок тестування: Запуск повноцінного двигуна Roblox...", "success");
           }}
@@ -1320,6 +1332,8 @@ export default function App() {
                   <button
                     onClick={() => {
                       setIsPublishOpen(false);
+                      setActiveRoomId(`cloud-game-${publishName.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`);
+                      setCurrentGameTitle(publishName);
                       setIsTesting(true); // Launch GameTestMode immediately!
                       addLog("Запуск опублікованої версії гри у Roblox Launcher...", "success");
                     }}

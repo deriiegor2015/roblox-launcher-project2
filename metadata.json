@@ -1,6 +1,6 @@
 {
-  "name": "Roblox Studio Online",
-  "description": "Онлайн-середовище для розробників Roblox Studio: інтерактивна 3D-сцена, Lua-редактор скриптів, запуск Lua у браузері та розумний AI-помічник для розробки ігор.",
+  "name": "Roblox Sandbox",
+  "description": "Roblox Sandbox — повнофункціональне пісочне онлайн-середовище для розробки ігор (віковий ценз: 4+): інтерактивна 3D-сцена, Lua-редактор скриптів, симуляція фізики, розрахований на багато користувачів мультиплеєр через WebSocket та ШІ-помічник.",
   "requestFramePermissions": ["microphone"],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

@@ -1,5 +1,7 @@
 import React, { useEffect, useRef, useState } from "react";
+import { io } from "socket.io-client";
 import * as THREE from "three";
+import Minimap from "./Minimap";
 import { EffectComposer } from "three/examples/jsm/postprocessing/EffectComposer.js";
 import { RenderPass } from "three/examples/jsm/postprocessing/RenderPass.js";
 import { UnrealBloomPass } from "three/examples/jsm/postprocessing/UnrealBloomPass.js";
@@ -88,6 +90,8 @@ interface GameTestModeProps {
   onLeaveGame: () => void;
   vcVolume?: number;
   onVcVolumeChange?: (val: number) => void;
+  activeRoomId?: string;
+  currentGameTitle?: string;
 }
 
 interface ChatMessage {
@@ -178,8 +182,15 @@ function speakNPCMessage(role: string, text: string, volumePercentage: number = 
   window.speechSynthesis.speak(utterance);
 }
 
-// Create Canvas-based elegant billboard 3D text speech bubble
-function createSpeechBubbleTexture(text: string): THREE.CanvasTexture | null {
+// Create Canvas-based elegant billboard 3D text speech bubble with custom colors
+function createSpeechBubbleTexture(
+  text: string, 
+  username?: string, 
+  usernameColor: string = "#00FF88", 
+  messageColor: string = "#FFFFFF", 
+  backgroundColor: string = "rgba(10, 15, 25, 0.92)", 
+  borderColor: string = "#00FF88"
+): THREE.CanvasTexture | null {
   if (typeof document === "undefined") return null;
 
   const canvas = document.createElement("canvas");
@@ -191,8 +202,8 @@ function createSpeechBubbleTexture(text: string): THREE.CanvasTexture | null {
   ctx.clearRect(0, 0, 512, 128);
 
   // Rounded rectangle path for the bubble
-  ctx.fillStyle = "rgba(10, 15, 25, 0.92)";
-  ctx.strokeStyle = "#00FF88";
+  ctx.fillStyle = backgroundColor;
+  ctx.strokeStyle = borderColor;
   ctx.lineWidth = 4;
   
   const r = 16;
@@ -218,36 +229,53 @@ function createSpeechBubbleTexture(text: string): THREE.CanvasTexture | null {
   ctx.fill();
   ctx.stroke();
 
-  // White text styling
-  ctx.fillStyle = "#ffffff";
-  ctx.font = "bold 20px -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif";
-  ctx.textAlign = "center";
-  ctx.textBaseline = "middle";
+  // Draw Username if provided
+  if (username) {
+    ctx.fillStyle = usernameColor;
+    ctx.font = "bold 15px -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillText(username, 256, 28);
 
-  // Wrap text lines
-  const words = text.split(" ");
-  let line = "";
-  const lines: string[] = [];
-  const maxWidth = 450;
-  
-  for (let n = 0; n < words.length; n++) {
-    const testLine = line + words[n] + " ";
-    const metrics = ctx.measureText(testLine);
-    if (metrics.width > maxWidth && n > 0) {
-      lines.push(line);
-      line = words[n] + " ";
-    } else {
-      line = testLine;
-    }
-  }
-  lines.push(line);
-
-  // Render text lines centered in the bubble
-  if (lines.length === 1) {
-    ctx.fillText(lines[0].trim(), 256, 52);
+    // Draw message below username
+    ctx.fillStyle = messageColor;
+    ctx.font = "bold 18px -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif";
+    
+    // Simple wrapping or shortening for message text to fit on one line
+    const displayMsg = text.length > 40 ? text.substring(0, 37) + "..." : text;
+    ctx.fillText(displayMsg, 256, 58);
   } else {
-    ctx.fillText(lines[0].trim(), 256, 36);
-    ctx.fillText(lines[1].trim(), 256, 68);
+    // Normal anonymous bubble
+    ctx.fillStyle = messageColor;
+    ctx.font = "bold 20px -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+
+    // Wrap text lines
+    const words = text.split(" ");
+    let line = "";
+    const lines: string[] = [];
+    const maxWidth = 450;
+    
+    for (let n = 0; n < words.length; n++) {
+      const testLine = line + words[n] + " ";
+      const metrics = ctx.measureText(testLine);
+      if (metrics.width > maxWidth && n > 0) {
+        lines.push(line);
+        line = words[n] + " ";
+      } else {
+        line = testLine;
+      }
+    }
+    lines.push(line);
+
+    // Render text lines centered in the bubble
+    if (lines.length === 1) {
+      ctx.fillText(lines[0].trim(), 256, 52);
+    } else {
+      ctx.fillText(lines[0].trim(), 256, 36);
+      ctx.fillText(lines[1].trim(), 256, 68);
+    }
   }
 
   const texture = new THREE.CanvasTexture(canvas);
@@ -255,7 +283,328 @@ function createSpeechBubbleTexture(text: string): THREE.CanvasTexture | null {
   return texture;
 }
 
-export default function GameTestMode({ parts, onLeaveGame, vcVolume = 80, onVcVolumeChange }: GameTestModeProps) {
+// Create billboard-style Name Tag above players' heads
+function createNameTagTexture(username: string, isVerified: boolean = false): THREE.CanvasTexture | null {
+  if (typeof document === "undefined") return null;
+
+  const canvas = document.createElement("canvas");
+  canvas.width = 256;
+  canvas.height = 64;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return null;
+
+  ctx.clearRect(0, 0, 256, 64);
+
+  // Background rounded rect
+  ctx.fillStyle = "rgba(10, 15, 25, 0.75)";
+  ctx.strokeStyle = isVerified ? "#00A2FF" : "#ffffff";
+  ctx.lineWidth = 3;
+  
+  const r = 10;
+  const x = 5, y = 5, w = 246, h = 54;
+  
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.lineTo(x + w - r, y);
+  ctx.quadraticCurveTo(x + w, y, x + w, y + r);
+  ctx.lineTo(x + w, y + h - r);
+  ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+  ctx.lineTo(x + r, y + h);
+  ctx.quadraticCurveTo(x, y + h, x, y + h - r);
+  ctx.lineTo(x, y + r);
+  ctx.quadraticCurveTo(x, y, x + r, y);
+  ctx.closePath();
+  ctx.fill();
+  ctx.stroke();
+
+  // Draw name
+  ctx.fillStyle = "#ffffff";
+  ctx.font = "bold 16px -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif";
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.fillText(username + (isVerified ? " ☑️" : ""), 128, 32);
+
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.minFilter = THREE.LinearFilter;
+  return texture;
+}
+
+// Builds an R6 style blocky avatar mesh for other connected players
+function createNetworkPlayerMesh(cfg: any): THREE.Group {
+  const npcGroup = new THREE.Group();
+  const avatarConfig = {
+    skinTone: cfg?.skinTone || "#FFD13B",
+    face: cfg?.face || "smile",
+    hat: cfg?.hat || "classic-cap",
+    shirt: cfg?.shirt || "roblox-hoodie",
+    pants: cfg?.pants || "jeans",
+    back: cfg?.back || "none"
+  };
+
+  const skinColor = avatarConfig.skinTone || "#FFD13B";
+  let shirtColorHex = "#2196f3";
+  if (avatarConfig.shirt === "none") shirtColorHex = skinColor;
+  else if (avatarConfig.shirt === "roblox-hoodie") shirtColorHex = "#262626";
+  else if (avatarConfig.shirt === "tuxedo") shirtColorHex = "#111111";
+  else if (avatarConfig.shirt === "superhero") shirtColorHex = "#1565C0";
+  else if (avatarConfig.shirt === "neon-tech") shirtColorHex = "#060D1A";
+  else if (avatarConfig.shirt === "armor") shirtColorHex = "#78909C";
+
+  let pantsColorHex = "#2c3e50";
+  if (avatarConfig.pants === "none") pantsColorHex = skinColor;
+  else if (avatarConfig.pants === "jeans") pantsColorHex = "#1976D2";
+  else if (avatarConfig.pants === "cargo") pantsColorHex = "#388E3C";
+  else if (avatarConfig.pants === "cyber-legs") pantsColorHex = "#1A237E";
+  else if (avatarConfig.pants === "rainbow") pantsColorHex = "#9c27b0";
+  else if (avatarConfig.pants === "gold-knight") pantsColorHex = "#F57F17";
+
+  const torsoMat = new THREE.MeshStandardMaterial({ color: shirtColorHex, roughness: 0.4 });
+  const pantsMat = new THREE.MeshStandardMaterial({ color: pantsColorHex, roughness: 0.5 });
+  const skinMat = new THREE.MeshStandardMaterial({ color: skinColor, roughness: 0.6 });
+
+  // Torso
+  const torso = new THREE.Mesh(new THREE.BoxGeometry(1.6, 2.0, 0.8), torsoMat);
+  torso.position.y = 1.0;
+  torso.castShadow = true;
+  torso.receiveShadow = true;
+  npcGroup.add(torso);
+
+  // Badge
+  if (avatarConfig.shirt === "roblox-hoodie") {
+    const logoMesh = new THREE.Mesh(
+      new THREE.BoxGeometry(0.7, 0.7, 0.05),
+      new THREE.MeshBasicMaterial({ color: "#ffffff" })
+    );
+    logoMesh.position.set(0, 1.15, 0.41);
+    npcGroup.add(logoMesh);
+  } else if (avatarConfig.shirt === "superhero") {
+    const starMesh = new THREE.Mesh(
+      new THREE.BoxGeometry(0.6, 0.6, 0.05),
+      new THREE.MeshBasicMaterial({ color: "#ffd700" })
+    );
+    starMesh.position.set(0, 1.15, 0.41);
+    npcGroup.add(starMesh);
+  }
+
+  // Head
+  const head = new THREE.Mesh(new THREE.BoxGeometry(1.0, 1.0, 1.0), skinMat);
+  head.position.y = 2.5;
+  head.castShadow = true;
+  npcGroup.add(head);
+
+  // Smiley face details
+  if (avatarConfig.face === "beast-mode") {
+    const eyeL = new THREE.Mesh(new THREE.BoxGeometry(0.15, 0.15, 0.1), new THREE.MeshBasicMaterial({ color: "#ff0000" }));
+    eyeL.position.set(-0.25, 2.6, 0.51);
+    npcGroup.add(eyeL);
+
+    const eyeR = new THREE.Mesh(new THREE.BoxGeometry(0.15, 0.15, 0.1), new THREE.MeshBasicMaterial({ color: "#ff0000" }));
+    eyeR.position.set(0.25, 2.6, 0.51);
+    npcGroup.add(eyeR);
+
+    const redSmile = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.12, 0.1), new THREE.MeshBasicMaterial({ color: "#ff0000" }));
+    redSmile.position.set(0, 2.32, 0.51);
+    npcGroup.add(redSmile);
+  } else if (avatarConfig.face === "chill") {
+    const sunglasses = new THREE.Mesh(new THREE.BoxGeometry(0.95, 0.22, 0.12), new THREE.MeshBasicMaterial({ color: "#1a1a1a" }));
+    sunglasses.position.set(0, 2.6, 0.51);
+    npcGroup.add(sunglasses);
+
+    const smile = new THREE.Mesh(new THREE.BoxGeometry(0.35, 0.08, 0.1), new THREE.MeshBasicMaterial({ color: "#000000" }));
+    smile.position.set(0.1, 2.35, 0.51);
+    npcGroup.add(smile);
+  } else if (avatarConfig.face === "winning-smile") {
+    const eyeL = new THREE.Mesh(new THREE.BoxGeometry(0.18, 0.25, 0.1), new THREE.MeshBasicMaterial({ color: "#000000" }));
+    eyeL.position.set(-0.25, 2.6, 0.51);
+    npcGroup.add(eyeL);
+
+    const eyeR = new THREE.Mesh(new THREE.BoxGeometry(0.18, 0.25, 0.1), new THREE.MeshBasicMaterial({ color: "#000000" }));
+    eyeR.position.set(0.25, 2.6, 0.51);
+    npcGroup.add(eyeR);
+
+    const bigSmile = new THREE.Mesh(new THREE.BoxGeometry(0.55, 0.25, 0.08), new THREE.MeshBasicMaterial({ color: "#ffffff" }));
+    bigSmile.position.set(0, 2.32, 0.51);
+    npcGroup.add(bigSmile);
+  } else if (avatarConfig.face === "man-face") {
+    const eyeL = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.1, 0.1), new THREE.MeshBasicMaterial({ color: "#000000" }));
+    eyeL.position.set(-0.25, 2.58, 0.51);
+    npcGroup.add(eyeL);
+
+    const eyeR = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.1, 0.1), new THREE.MeshBasicMaterial({ color: "#000000" }));
+    eyeR.position.set(0.25, 2.58, 0.51);
+    npcGroup.add(eyeR);
+
+    const eyebrowL = new THREE.Mesh(new THREE.BoxGeometry(0.25, 0.05, 0.1), new THREE.MeshBasicMaterial({ color: "#000000" }));
+    eyebrowL.position.set(-0.25, 2.7, 0.51);
+    eyebrowL.rotation.z = -0.15;
+    npcGroup.add(eyebrowL);
+
+    const eyebrowR = new THREE.Mesh(new THREE.BoxGeometry(0.25, 0.05, 0.1), new THREE.MeshBasicMaterial({ color: "#000000" }));
+    eyebrowR.position.set(0.25, 2.7, 0.51);
+    eyebrowR.rotation.z = 0.25;
+    npcGroup.add(eyebrowR);
+
+    const smile = new THREE.Mesh(new THREE.BoxGeometry(0.35, 0.08, 0.1), new THREE.MeshBasicMaterial({ color: "#000000" }));
+    smile.position.set(0.1, 2.36, 0.51);
+    npcGroup.add(smile);
+  } else {
+    const eyeL = new THREE.Mesh(new THREE.BoxGeometry(0.15, 0.15, 0.1), new THREE.MeshBasicMaterial({ color: "#000000" }));
+    eyeL.position.set(-0.25, 2.6, 0.51);
+    npcGroup.add(eyeL);
+
+    const eyeR = new THREE.Mesh(new THREE.BoxGeometry(0.15, 0.15, 0.1), new THREE.MeshBasicMaterial({ color: "#000000" }));
+    eyeR.position.set(0.25, 2.6, 0.51);
+    npcGroup.add(eyeR);
+
+    const smile = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.08, 0.1), new THREE.MeshBasicMaterial({ color: "#000000" }));
+    smile.position.set(0, 2.35, 0.51);
+    npcGroup.add(smile);
+  }
+
+  // Hats Configuration
+  if (avatarConfig.hat === "classic-cap") {
+    const capVisor = new THREE.Mesh(new THREE.BoxGeometry(1.1, 0.1, 0.6), new THREE.MeshStandardMaterial({ color: "#e91e63" }));
+    capVisor.position.set(0, 3.0, 0.45);
+    npcGroup.add(capVisor);
+
+    const capDome = new THREE.Mesh(new THREE.BoxGeometry(1.1, 0.4, 1.1), new THREE.MeshStandardMaterial({ color: "#00ff88" }));
+    capDome.position.set(0, 3.2, 0);
+    npcGroup.add(capDome);
+  } else if (avatarConfig.hat === "fedora") {
+    const brim = new THREE.Mesh(new THREE.BoxGeometry(1.5, 0.08, 1.5), new THREE.MeshStandardMaterial({ color: "#1f1f1f" }));
+    brim.position.set(0, 3.0, 0);
+    npcGroup.add(brim);
+
+    const fedoraCrown = new THREE.Mesh(new THREE.BoxGeometry(1.0, 0.6, 1.0), new THREE.MeshStandardMaterial({ color: "#1f1f1f" }));
+    fedoraCrown.position.set(0, 3.3, 0);
+    npcGroup.add(fedoraCrown);
+
+    const redStripe = new THREE.Mesh(new THREE.BoxGeometry(1.02, 0.1, 1.02), new THREE.MeshStandardMaterial({ color: "#d32f2f" }));
+    redStripe.position.set(0, 3.1, 0);
+    npcGroup.add(redStripe);
+  } else if (avatarConfig.hat === "crown") {
+    const crownRing = new THREE.Mesh(new THREE.CylinderGeometry(0.55, 0.55, 0.3, 16), new THREE.MeshStandardMaterial({ color: "#ffd700", metalness: 0.9, roughness: 0.1 }));
+    crownRing.position.set(0, 3.1, 0);
+    npcGroup.add(crownRing);
+
+    for (let i = 0; i < 5; i++) {
+      const angle = (i / 5) * Math.PI * 2;
+      const spike = new THREE.Mesh(new THREE.ConeGeometry(0.12, 0.4, 4), new THREE.MeshStandardMaterial({ color: "#ffd700", metalness: 0.9, roughness: 0.1 }));
+      spike.position.set(Math.sin(angle) * 0.5, 3.35, Math.cos(angle) * 0.5);
+      spike.rotation.y = angle;
+      npcGroup.add(spike);
+    }
+  } else if (avatarConfig.hat === "valkyrie") {
+    const helm = new THREE.Mesh(new THREE.BoxGeometry(1.05, 0.3, 1.05), new THREE.MeshStandardMaterial({ color: "#78909c", metalness: 0.7, roughness: 0.2 }));
+    helm.position.set(0, 3.1, 0);
+    npcGroup.add(helm);
+
+    const wingL = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.8, 0.5), new THREE.MeshStandardMaterial({ color: "#ffffff", roughness: 0.9 }));
+    wingL.position.set(-0.6, 3.3, 0.1);
+    wingL.rotation.z = 0.25;
+    wingL.rotation.y = 0.15;
+    npcGroup.add(wingL);
+
+    const wingR = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.8, 0.5), new THREE.MeshStandardMaterial({ color: "#ffffff", roughness: 0.9 }));
+    wingR.position.set(0.6, 3.3, 0.1);
+    wingR.rotation.z = -0.25;
+    wingR.rotation.y = -0.15;
+    npcGroup.add(wingR);
+  } else if (avatarConfig.hat === "dominus") {
+    const hood = new THREE.Mesh(new THREE.BoxGeometry(1.2, 1.2, 1.2), new THREE.MeshStandardMaterial({ color: "#311B92", roughness: 0.5 }));
+    hood.position.set(0, 2.5, 0);
+    npcGroup.add(hood);
+
+    const shield = new THREE.Mesh(new THREE.BoxGeometry(0.85, 0.85, 0.1), new THREE.MeshBasicMaterial({ color: "#070212" }));
+    shield.position.set(0, 2.5, 0.56);
+    npcGroup.add(shield);
+
+    const glowL = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.12, 0.05), new THREE.MeshBasicMaterial({ color: "#ffd700" }));
+    glowL.position.set(-0.2, 2.6, 0.62);
+    npcGroup.add(glowL);
+
+    const glowR = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.12, 0.05), new THREE.MeshBasicMaterial({ color: "#ffd700" }));
+    glowR.position.set(0.2, 2.6, 0.62);
+    npcGroup.add(glowR);
+  } else {
+    const hair = new THREE.Mesh(new THREE.BoxGeometry(1.02, 0.3, 1.02), new THREE.MeshStandardMaterial({ color: "#4e342e", roughness: 0.8 }));
+    hair.position.set(0, 3.05, -0.05);
+    npcGroup.add(hair);
+  }
+
+  // Back Accessories
+  if (avatarConfig.back === "wings") {
+    const leftWing = new THREE.Mesh(new THREE.BoxGeometry(1.8, 0.8, 0.08), new THREE.MeshStandardMaterial({ color: "#e0f7fa", transparent: true, opacity: 0.8 }));
+    leftWing.position.set(-1.2, 1.2, -0.6);
+    leftWing.rotation.y = 0.3;
+    leftWing.rotation.z = 0.2;
+    npcGroup.add(leftWing);
+
+    const rightWing = new THREE.Mesh(new THREE.BoxGeometry(1.8, 0.8, 0.08), new THREE.MeshStandardMaterial({ color: "#e0f7fa", transparent: true, opacity: 0.8 }));
+    rightWing.position.set(1.2, 1.2, -0.6);
+    rightWing.rotation.y = -0.3;
+    rightWing.rotation.z = -0.2;
+    npcGroup.add(rightWing);
+  } else if (avatarConfig.back === "cape") {
+    const cape = new THREE.Mesh(new THREE.BoxGeometry(1.4, 2.2, 0.08), new THREE.MeshStandardMaterial({ color: "#b71c1c", roughness: 0.6 }));
+    cape.position.set(0, 0.6, -0.46);
+    cape.rotation.x = 0.08;
+    npcGroup.add(cape);
+  } else if (avatarConfig.back === "swords") {
+    const sword1 = new THREE.Mesh(new THREE.BoxGeometry(0.1, 2.4, 0.1), new THREE.MeshStandardMaterial({ color: "#cfd8dc", metalness: 0.8, roughness: 0.2 }));
+    sword1.position.set(-0.3, 1.1, -0.5);
+    sword1.rotation.z = 0.6;
+    npcGroup.add(sword1);
+
+    const sword2 = new THREE.Mesh(new THREE.BoxGeometry(0.1, 2.4, 0.1), new THREE.MeshStandardMaterial({ color: "#cfd8dc", metalness: 0.8, roughness: 0.2 }));
+    sword2.position.set(0.3, 1.1, -0.5);
+    sword2.rotation.z = -0.6;
+    npcGroup.add(sword2);
+  } else if (avatarConfig.back === "jetpack") {
+    const pack = new THREE.Mesh(new THREE.BoxGeometry(1.2, 1.3, 0.5), new THREE.MeshStandardMaterial({ color: "#455a64", metalness: 0.5 }));
+    pack.position.set(0, 1.0, -0.65);
+    npcGroup.add(pack);
+
+    const thrusterL = new THREE.Mesh(new THREE.CylinderGeometry(0.15, 0.15, 0.4), new THREE.MeshStandardMaterial({ color: "#37474f" }));
+    thrusterL.position.set(-0.4, 0.3, -0.65);
+    npcGroup.add(thrusterL);
+
+    const thrusterR = new THREE.Mesh(new THREE.CylinderGeometry(0.15, 0.15, 0.4), new THREE.MeshStandardMaterial({ color: "#37474f" }));
+    thrusterR.position.set(0.4, 0.3, -0.65);
+    npcGroup.add(thrusterR);
+  }
+
+  // Arms
+  const armL = new THREE.Mesh(new THREE.BoxGeometry(0.7, 2.0, 0.7), torsoMat);
+  armL.position.set(-1.15, 1.0, 0);
+  armL.castShadow = true;
+  npcGroup.add(armL);
+
+  const armR = new THREE.Mesh(new THREE.BoxGeometry(0.7, 2.0, 0.7), torsoMat);
+  armR.position.set(1.15, 1.0, 0);
+  armR.castShadow = true;
+  npcGroup.add(armR);
+
+  // Legs
+  const legL = new THREE.Mesh(new THREE.BoxGeometry(0.75, 2.0, 0.75), pantsMat);
+  legL.position.set(-0.425, -1.0, 0);
+  legL.castShadow = true;
+  npcGroup.add(legL);
+
+  const legR = new THREE.Mesh(new THREE.BoxGeometry(0.75, 2.0, 0.75), pantsMat);
+  legR.position.set(0.425, -1.0, 0);
+  legR.castShadow = true;
+  npcGroup.add(legR);
+
+  // Raise pivot
+  npcGroup.children.forEach(child => {
+    child.position.y += 1.0;
+  });
+
+  return npcGroup;
+}
+
+export default function GameTestMode({ parts, onLeaveGame, vcVolume = 80, onVcVolumeChange, activeRoomId, currentGameTitle }: GameTestModeProps) {
   const mountRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
@@ -264,6 +613,278 @@ export default function GameTestMode({ parts, onLeaveGame, vcVolume = 80, onVcVo
   const [deaths, setDeaths] = useState<number>(0);
   const [health, setHealth] = useState<number>(100);
   const [spawnLocation, setSpawnLocation] = useState<[number, number, number]>([0, 5, 0]);
+
+  // Real-time multiplayer WebSocket state and references
+  const [networkPlayers, setNetworkPlayers] = useState<any[]>([]);
+  const networkPlayersRef = useRef<Record<string, {
+    id: string;
+    username: string;
+    avatarConfig: any;
+    position: [number, number, number];
+    rotation: [number, number, number];
+    mesh?: THREE.Group;
+    bubbleMesh?: THREE.Sprite;
+    lastUpdated: number;
+    speakingTimer?: any;
+    coins?: number;
+    deaths?: number;
+  }>>({});
+  const socketRef = useRef<any>(null);
+
+  const updateNetworkPlayersList = () => {
+    setNetworkPlayers(Object.values(networkPlayersRef.current));
+  };
+
+  // --- MULTIPLAYER CORE HELPER FUNCTIONS ---
+
+  const spawnNetworkPlayer = (playerData: any) => {
+    const scene = sceneRef.current;
+    if (!scene) return;
+
+    // Remove existing mesh if any to avoid duplicates
+    if (networkPlayersRef.current[playerData.id]) {
+      const existing = networkPlayersRef.current[playerData.id];
+      if (existing.mesh) {
+        scene.remove(existing.mesh);
+        existing.mesh.traverse((child: any) => {
+          if (child.isMesh) {
+            child.geometry.dispose();
+            child.material.dispose();
+          }
+        });
+      }
+      if (existing.speakingTimer) clearTimeout(existing.speakingTimer);
+    }
+
+    // Build the 3D Avatar
+    const mesh = createNetworkPlayerMesh(playerData.avatarConfig);
+    mesh.position.set(playerData.position[0], playerData.position[1], playerData.position[2]);
+    mesh.rotation.set(playerData.rotation[0], playerData.rotation[1], playerData.rotation[2]);
+    scene.add(mesh);
+
+    // Add Name Tag billboard above their head
+    const isVerified = playerData.avatarConfig?.isVerified || false;
+    const nameTagTex = createNameTagTexture(playerData.username, isVerified);
+    if (nameTagTex) {
+      const spriteMat = new THREE.SpriteMaterial({ map: nameTagTex, transparent: true });
+      const sprite = new THREE.Sprite(spriteMat);
+      sprite.position.set(0, 4.0, 0);
+      sprite.scale.set(2.5, 0.625, 1);
+      mesh.add(sprite);
+    }
+
+    networkPlayersRef.current[playerData.id] = {
+      ...playerData,
+      mesh,
+      lastUpdated: Date.now()
+    };
+
+    updateNetworkPlayersList();
+  };
+
+  const moveNetworkPlayer = (id: string, position: [number, number, number], rotation: [number, number, number]) => {
+    const player = networkPlayersRef.current[id];
+    if (player && player.mesh) {
+      // Smooth movement updates
+      player.mesh.position.set(position[0], position[1], position[2]);
+      player.mesh.rotation.set(rotation[0], rotation[1], rotation[2]);
+      player.position = position;
+      player.rotation = rotation;
+      player.lastUpdated = Date.now();
+    }
+  };
+
+  const removeNetworkPlayer = (id: string) => {
+    const player = networkPlayersRef.current[id];
+    if (player) {
+      if (player.mesh) {
+        const scene = sceneRef.current;
+        if (scene) scene.remove(player.mesh);
+        player.mesh.traverse((child: any) => {
+          if (child.isMesh) {
+            child.geometry.dispose();
+            child.material.dispose();
+          }
+        });
+      }
+      if (player.speakingTimer) clearTimeout(player.speakingTimer);
+      delete networkPlayersRef.current[id];
+      updateNetworkPlayersList();
+    }
+  };
+
+  const showNetworkPlayerSpeechBubble = (id: string, username: string, message: string) => {
+    const player = networkPlayersRef.current[id];
+    if (player && player.mesh) {
+      if (player.bubbleMesh) {
+        player.mesh.remove(player.bubbleMesh);
+        player.bubbleMesh.material.dispose();
+        player.bubbleMesh = undefined;
+      }
+
+      // Re-use texture painter with custom colors for real multiplayer players!
+      const bubbleTex = createSpeechBubbleTexture(message, username, "#00A2FF", "#FFFFFF", "rgba(10, 15, 25, 0.95)", "#00A2FF");
+      if (bubbleTex) {
+        const spriteMat = new THREE.SpriteMaterial({ map: bubbleTex, transparent: true });
+        const sprite = new THREE.Sprite(spriteMat);
+        sprite.position.set(0, 5.2, 0); // Above name tag
+        sprite.scale.set(4.5, 1.25, 1);
+        player.mesh.add(sprite);
+        player.bubbleMesh = sprite;
+      }
+
+      if (player.speakingTimer) clearTimeout(player.speakingTimer);
+      player.speakingTimer = setTimeout(() => {
+        if (player.mesh && player.bubbleMesh) {
+          player.mesh.remove(player.bubbleMesh);
+          player.bubbleMesh.material.dispose();
+          player.bubbleMesh = undefined;
+        }
+      }, 5000);
+    }
+  };
+
+  const updateNetworkPlayerAvatar = (id: string, newConfig: any) => {
+    const player = networkPlayersRef.current[id];
+    if (player) {
+      player.avatarConfig = newConfig;
+      spawnNetworkPlayer(player);
+    }
+  };
+
+  // Main client Socket.io connection management lifecycle
+  useEffect(() => {
+    const myId = "player-" + Math.floor(100000 + Math.random() * 900000);
+    const myUsername = avatarConfig.nickname || "Robloxian";
+    
+    console.log("[Multiplayer] Connecting to server via Socket.io...");
+    const socket = io(window.location.origin, {
+      transports: ["websocket", "polling"],
+      autoConnect: true
+    });
+    socketRef.current = socket;
+
+    socket.on("connect", () => {
+      console.log("[Multiplayer] Connected to Roblox Sandbox via Socket.io!");
+      // Send join event
+      socket.emit("join", {
+        id: myId,
+        username: myUsername,
+        avatarConfig: avatarConfig,
+        roomId: activeRoomId || "lobby",
+        position: [playerPos.current.x, playerPos.current.y, playerPos.current.z],
+        rotation: [0, characterRotation.current, 0]
+      });
+    });
+
+    socket.on("room_state", (data: any) => {
+      // Spawn other players in this room
+      data.players.forEach((p: any) => {
+        if (p.id !== myId) {
+          spawnNetworkPlayer(p);
+        }
+      });
+    });
+
+    socket.on("player_joined", (data: any) => {
+      if (data.player.id !== myId) {
+        spawnNetworkPlayer(data.player);
+        
+        // Push system chat message
+        const formattedTime = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+        setChatMessages(prev => [
+          ...prev.slice(-90),
+          {
+            id: `sys-${Date.now()}`,
+            sender: "System",
+            text: `Гравець ${data.player.username} приєднався до кімнати! 🚪`,
+            time: formattedTime
+          }
+        ]);
+      }
+    });
+
+    socket.on("player_moved", (data: any) => {
+      if (data.id !== myId) {
+        moveNetworkPlayer(data.id, data.position, data.rotation);
+      }
+    });
+
+    socket.on("player_chatted", (data: any) => {
+      if (data.id !== myId) {
+        const formattedTime = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+        setChatMessages(prev => [
+          ...prev.slice(-90),
+          {
+            id: `net-chat-${Date.now()}`,
+            sender: data.username,
+            text: moderateText(data.message),
+            time: formattedTime
+          }
+        ]);
+
+        // Show 3D speech bubble above head
+        showNetworkPlayerSpeechBubble(data.id, data.username, data.message);
+
+        // Play synthesized speech
+        speakNPCMessage("Player", data.message, vcVolume);
+      }
+    });
+
+    socket.on("player_avatar_updated", (data: any) => {
+      if (data.id !== myId) {
+        updateNetworkPlayerAvatar(data.id, data.avatarConfig);
+      }
+    });
+
+    socket.on("player_left", (data: any) => {
+      removeNetworkPlayer(data.id);
+      
+      const formattedTime = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+      setChatMessages(prev => [
+        ...prev.slice(-90),
+        {
+          id: `sys-left-${Date.now()}`,
+          sender: "System",
+          text: `Гравець ${data.username} залишив кімнату. 👋`,
+          time: formattedTime
+        }
+      ]);
+    });
+
+    socket.on("connect_error", (err: any) => {
+      console.log("[Multiplayer] Socket.io connection issue:", err);
+    });
+
+    socket.on("disconnect", () => {
+      console.log("[Multiplayer] Socket.io connection closed.");
+    });
+
+    // Update position interval (20Hz)
+    const moveInterval = setInterval(() => {
+      if (socket.connected) {
+        socket.emit("move", {
+          position: [playerPos.current.x, playerPos.current.y, playerPos.current.z],
+          rotation: [0, characterRotation.current, 0]
+        });
+      }
+    }, 100);
+
+    return () => {
+      clearInterval(moveInterval);
+      socket.disconnect();
+    };
+  }, [activeRoomId]);
+
+  // Sync stats (coins, deaths) changes to the server
+  useEffect(() => {
+    if (socketRef.current && socketRef.current.connected) {
+      socketRef.current.emit("stats_update", {
+        coins,
+        deaths
+      });
+    }
+  }, [coins, deaths]);
 
   // UI state toggles
   const [isEscMenuOpen, setIsEscMenuOpen] = useState<boolean>(false);
@@ -377,6 +998,120 @@ export default function GameTestMode({ parts, onLeaveGame, vcVolume = 80, onVcVo
   }>>([]);
 
   const isDying = useRef<boolean>(false);
+
+  // Virtual Joystick & Mobile Touch Controls States & Refs
+  const [showTouchControls, setShowTouchControls] = useState<boolean>(false);
+  const [joystickPos, setJoystickPos] = useState({ x: 0, y: 0 });
+  
+  const joystickValue = useRef({ x: 0, y: 0 });
+  const isJoystickActive = useRef<boolean>(false);
+  const touchJumpPressed = useRef<boolean>(false);
+  
+  const joystickBaseRef = useRef<HTMLDivElement>(null);
+  const joystickTouchIdRef = useRef<number | null>(null);
+
+  // Auto-detect touchscreen capability
+  useEffect(() => {
+    const isTouch = ('ontouchstart' in window) || (navigator.maxTouchPoints > 0);
+    if (isTouch) {
+      setShowTouchControls(true);
+    }
+    
+    const handleWindowTouch = () => {
+      setShowTouchControls(true);
+      window.removeEventListener("touchstart", handleWindowTouch);
+    };
+    window.addEventListener("touchstart", handleWindowTouch);
+    return () => {
+      window.removeEventListener("touchstart", handleWindowTouch);
+    };
+  }, []);
+
+  const handleJoystickStart = (e: React.TouchEvent<HTMLDivElement>) => {
+    e.stopPropagation();
+    if (joystickTouchIdRef.current !== null) return;
+
+    const touch = e.changedTouches[0];
+    joystickTouchIdRef.current = touch.identifier;
+    isJoystickActive.current = true;
+    updateJoystick(touch);
+  };
+
+  const handleJoystickMove = (e: React.TouchEvent<HTMLDivElement>) => {
+    e.stopPropagation();
+    if (joystickTouchIdRef.current === null) return;
+
+    let activeTouch: Touch | null = null;
+    for (let i = 0; i < e.touches.length; i++) {
+      if (e.touches[i].identifier === joystickTouchIdRef.current) {
+        activeTouch = e.touches[i];
+        break;
+      }
+    }
+
+    if (activeTouch) {
+      updateJoystick(activeTouch);
+    }
+  };
+
+  const handleJoystickEnd = (e: React.TouchEvent<HTMLDivElement>) => {
+    e.stopPropagation();
+    if (joystickTouchIdRef.current === null) return;
+
+    for (let i = 0; i < e.changedTouches.length; i++) {
+      if (e.changedTouches[i].identifier === joystickTouchIdRef.current) {
+        joystickTouchIdRef.current = null;
+        isJoystickActive.current = false;
+        joystickValue.current = { x: 0, y: 0 };
+        setJoystickPos({ x: 0, y: 0 });
+        break;
+      }
+    }
+  };
+
+  const updateJoystick = (touch: Touch) => {
+    if (!joystickBaseRef.current) return;
+
+    const rect = joystickBaseRef.current.getBoundingClientRect();
+    const centerX = rect.left + rect.width / 2;
+    const centerY = rect.top + rect.height / 2;
+
+    const dx = touch.clientX - centerX;
+    const dy = touch.clientY - centerY;
+
+    const distance = Math.sqrt(dx * dx + dy * dy);
+    const maxRadius = rect.width / 2;
+
+    let clampedDx = dx;
+    let clampedDy = dy;
+
+    if (distance > maxRadius) {
+      clampedDx = (dx / distance) * maxRadius;
+      clampedDy = (dy / distance) * maxRadius;
+    }
+
+    joystickValue.current = {
+      x: clampedDx / maxRadius,
+      y: clampedDy / maxRadius
+    };
+
+    setJoystickPos({
+      x: clampedDx,
+      y: clampedDy
+    });
+  };
+
+  const handleJumpStart = (e: React.TouchEvent) => {
+    e.stopPropagation();
+    e.preventDefault();
+    touchJumpPressed.current = true;
+  };
+
+  const handleJumpEnd = (e: React.TouchEvent) => {
+    e.stopPropagation();
+    e.preventDefault();
+    touchJumpPressed.current = false;
+  };
 
   // Find initial spawn point among workspace parts
   useEffect(() => {
@@ -890,6 +1625,13 @@ export default function GameTestMode({ parts, onLeaveGame, vcVolume = 80, onVcVo
     addChatMessage("Player", moderatedInput);
     setChatInput("");
     setIsChatFocused(false);
+
+    // Broadcast chat message over Socket.io to other players
+    if (socketRef.current && socketRef.current.connected && !rawInput.startsWith("/")) {
+      socketRef.current.emit("chat", {
+        message: moderatedInput
+      });
+    }
 
     // Command Parser
     if (rawInput.startsWith("/")) {
@@ -1663,6 +2405,68 @@ export default function GameTestMode({ parts, onLeaveGame, vcVolume = 80, onVcVo
       isMouseDown.current = false;
     };
 
+    // Touch orbital dragging events for camera rotation on mobile
+    let isTouchingCamera = false;
+    let previousTouchPosition = { x: 0, y: 0 };
+    let cameraTouchId: number | null = null;
+
+    const handleTouchStart = (e: TouchEvent) => {
+      if (isTouchingCamera) return;
+
+      const touch = e.changedTouches[0];
+      const target = touch.target as HTMLElement;
+      
+      // Avoid camera dragging when interacting with HUD controls or virtual joystick/jump button
+      if (
+        target.closest('button') || 
+        target.closest('input') || 
+        target.closest('#virtual-joystick') || 
+        target.closest('#virtual-jump') ||
+        target.closest('#roblox-leaderboard') ||
+        target.closest('#btn-send-chat')
+      ) {
+        return;
+      }
+
+      isTouchingCamera = true;
+      cameraTouchId = touch.identifier;
+      previousTouchPosition = { x: touch.clientX, y: touch.clientY };
+    };
+
+    const handleTouchMove = (e: TouchEvent) => {
+      if (!isTouchingCamera || cameraTouchId === null) return;
+
+      let activeTouch: Touch | null = null;
+      for (let i = 0; i < e.touches.length; i++) {
+        if (e.touches[i].identifier === cameraTouchId) {
+          activeTouch = e.touches[i];
+          break;
+        }
+      }
+
+      if (!activeTouch) return;
+
+      const deltaX = activeTouch.clientX - previousTouchPosition.x;
+      const deltaY = activeTouch.clientY - previousTouchPosition.y;
+
+      theta.current -= deltaX * 0.008;
+      phi.current = Math.max(0.1, Math.min(Math.PI / 2 - 0.05, phi.current + deltaY * 0.008));
+
+      previousTouchPosition = { x: activeTouch.clientX, y: activeTouch.clientY };
+    };
+
+    const handleTouchEnd = (e: TouchEvent) => {
+      if (!isTouchingCamera || cameraTouchId === null) return;
+
+      for (let i = 0; i < e.changedTouches.length; i++) {
+        if (e.changedTouches[i].identifier === cameraTouchId) {
+          isTouchingCamera = false;
+          cameraTouchId = null;
+          break;
+        }
+      }
+    };
+
     // Mouse scroll wheel zooming
     const handleWheel = (e: WheelEvent) => {
       // Zoom logic
@@ -1675,6 +2479,10 @@ export default function GameTestMode({ parts, onLeaveGame, vcVolume = 80, onVcVo
     window.addEventListener("mousemove", handleMouseMove);
     window.addEventListener("mouseup", handleMouseUp);
     window.addEventListener("wheel", handleWheel, { passive: true });
+    window.addEventListener("touchstart", handleTouchStart, { passive: true });
+    window.addEventListener("touchmove", handleTouchMove, { passive: true });
+    window.addEventListener("touchend", handleTouchEnd, { passive: true });
+    window.addEventListener("touchcancel", handleTouchEnd, { passive: true });
 
     // Initial positioning
     playerPos.current.set(spawnLocation[0], spawnLocation[1], spawnLocation[2]);
@@ -1716,6 +2524,12 @@ export default function GameTestMode({ parts, onLeaveGame, vcVolume = 80, onVcVo
       }
       if (keysPressed.current["d"]) {
         moveVec.x += 1;
+      }
+
+      // Add virtual joystick movement values
+      if (isJoystickActive.current) {
+        moveVec.x += joystickValue.current.x;
+        moveVec.z += joystickValue.current.y;
       }
 
       moveVec.normalize();
@@ -1769,7 +2583,7 @@ export default function GameTestMode({ parts, onLeaveGame, vcVolume = 80, onVcVo
       playerVel.current.y += gravity * delta;
 
       // Jump request
-      if (keysPressed.current[" "] && isGrounded.current && !isDying.current) {
+      if ((keysPressed.current[" "] || touchJumpPressed.current) && isGrounded.current && !isDying.current) {
         playerVel.current.y = 16.5; 
         isGrounded.current = false;
         playSynthSound("jump");
@@ -2025,6 +2839,10 @@ export default function GameTestMode({ parts, onLeaveGame, vcVolume = 80, onVcVo
       window.removeEventListener("mousemove", handleMouseMove);
       window.removeEventListener("mouseup", handleMouseUp);
       window.removeEventListener("wheel", handleWheel);
+      window.removeEventListener("touchstart", handleTouchStart);
+      window.removeEventListener("touchmove", handleTouchMove);
+      window.removeEventListener("touchend", handleTouchEnd);
+      window.removeEventListener("touchcancel", handleTouchEnd);
       if (composerRef.current) {
         composerRef.current.dispose();
         composerRef.current = null;
@@ -2129,7 +2947,13 @@ export default function GameTestMode({ parts, onLeaveGame, vcVolume = 80, onVcVo
           </div>
 
           {/* Top-Right: Roblox Leaderboard (Leaderstats) */}
-          <div className="flex flex-col gap-1 pointer-events-auto items-end">
+          <div className="flex flex-col gap-2 pointer-events-auto items-end">
+            <Minimap 
+              parts={parts} 
+              playerPosRef={playerPos} 
+              characterRotationRef={characterRotation} 
+              npcsRef={npcsRef} 
+            />
             <div className="bg-black/65 backdrop-blur-md border border-white/10 p-3 rounded-xl text-white font-mono text-xs shadow-2xl min-w-[240px]" id="roblox-leaderboard">
               <div className="border-b border-white/10 pb-1.5 mb-2 flex items-center justify-between font-bold text-gray-400 uppercase tracking-wider text-[10px]">
                 <span className="flex items-center gap-1"><Users className="w-3.5 h-3.5 text-brand" /> Гравці</span>
@@ -2147,6 +2971,21 @@ export default function GameTestMode({ parts, onLeaveGame, vcVolume = 80, onVcVo
                     <span className="flex items-center gap-0.5 text-rose-400">💀 {deaths}</span>
                   </div>
                 </div>
+
+                {/* Real network multiplayer players list */}
+                {networkPlayers.map(p => (
+                  <div key={p.id} className="flex items-center justify-between text-white text-[11px] border-t border-white/5 pt-1.5 font-bold">
+                    <span className="flex items-center gap-1 text-cyan-400">
+                      {p.avatarConfig?.isVerified && <ShieldCheck className="w-3.5 h-3.5 text-[#00A2FF] fill-[#00A2FF]/20 inline" />}
+                      <span>{p.username}</span>
+                      <span className="text-[8px] bg-cyan-500/20 text-cyan-300 px-1 rounded">NET</span>
+                    </span>
+                    <div className="flex items-center gap-2 text-gray-200">
+                      <span>🪙 {p.coins ?? 0}</span>
+                      <span className="text-rose-400">💀 {p.deaths ?? 0}</span>
+                    </div>
+                  </div>
+                ))}
 
                 {/* Simulated multiplayer players list */}
                 {npcsRef.current.map(npc => (
@@ -2183,7 +3022,7 @@ export default function GameTestMode({ parts, onLeaveGame, vcVolume = 80, onVcVo
         <div className="flex items-end justify-between w-full">
           
           {/* Bottom-Left: Standard Floating Chat Messages box */}
-          <div className="flex flex-col gap-2 w-[420px] pointer-events-auto">
+          <div className={`flex flex-col gap-2 w-[420px] max-w-full pointer-events-auto transition-all ${showTouchControls ? "pb-28 sm:pb-0" : ""}`}>
             {/* Messages Stream Container */}
             <div className="bg-black/60 backdrop-blur-sm border border-white/10 p-3.5 rounded-xl h-48 overflow-y-auto flex flex-col gap-1.5 font-mono text-xs shadow-inner scrollbar-thin">
               {chatMessages.map((msg) => (
@@ -2249,7 +3088,7 @@ export default function GameTestMode({ parts, onLeaveGame, vcVolume = 80, onVcVo
           </div>
 
           {/* Bottom-Right: Voice indicators & Health bar */}
-          <div className="flex flex-col gap-2 pointer-events-auto items-end">
+          <div className={`flex flex-col gap-2 pointer-events-auto items-end transition-all ${showTouchControls ? "pb-24 sm:pb-0" : ""}`}>
             
             {/* Live voice chat simulated frequency bars */}
             {isVoiceActive && (
@@ -2429,23 +3268,64 @@ export default function GameTestMode({ parts, onLeaveGame, vcVolume = 80, onVcVo
 
               {escTab === "Players" && (
                 <div className="space-y-3">
-                  <h4 className="text-xs font-bold text-gray-400">Гравці на цьому локальному сервері:</h4>
-                  <div className="space-y-2">
-                    <div className="bg-[#12151a] border border-white/5 p-3 rounded-lg flex justify-between items-center">
-                      <span className="text-xs font-bold flex items-center gap-1.5">
-                        {isVerifiedDev && <ShieldCheck className="w-4 h-4 text-brand fill-brand/20" />}
-                        <span>{avatarConfig.nickname} (Ви)</span>
+                  <div className="flex justify-between items-center">
+                    <h4 className="text-xs font-bold text-gray-400">Активні мережеві гравці у кімнаті ({networkPlayers.length + 1}):</h4>
+                    {activeRoomId && (
+                      <span className="text-[9px] bg-cyan-500/20 text-cyan-300 font-mono px-1.5 py-0.5 rounded border border-cyan-500/10">
+                        ROOM: {activeRoomId}
                       </span>
-                      <span className="text-[10px] text-gray-500">PING: 12ms</span>
+                    )}
+                  </div>
+                  <div className="space-y-2 max-h-56 overflow-y-auto pr-1">
+                    {/* Local Player (You) */}
+                    <div className="bg-[#12151a] border border-cyan-500/20 p-3 rounded-lg flex justify-between items-center">
+                      <div className="flex items-center gap-2">
+                        <div className="w-6 h-6 rounded-md border border-[#00FF88]/30 flex items-center justify-center text-[10px] bg-[#00FF88]/10 text-[#00FF88] font-bold">
+                          ME
+                        </div>
+                        <span className="text-xs font-bold flex items-center gap-1.5 text-white">
+                          {isVerifiedDev && <ShieldCheck className="w-4 h-4 text-brand fill-brand/20" />}
+                          <span>{avatarConfig.nickname} (Ви)</span>
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-3">
+                        <span className="text-[10px] font-mono text-gray-400">🪙 {coins}</span>
+                        <span className="text-[10px] text-[#00FF88] font-mono">12ms 🟢</span>
+                      </div>
                     </div>
 
+                    {/* Network Players (Socket.io) */}
+                    {networkPlayers.map(p => (
+                      <div key={p.id} className="bg-[#0b0d12] border border-white/5 p-3 rounded-lg flex justify-between items-center">
+                        <div className="flex items-center gap-2">
+                          <div className="w-6 h-6 rounded-md border border-cyan-500/30 flex items-center justify-center text-[10px] bg-cyan-500/10 text-cyan-400 font-bold uppercase font-mono">
+                            {p.username.substring(0, 2)}
+                          </div>
+                          <span className="text-xs font-bold flex items-center gap-1.5 text-gray-200">
+                            {p.avatarConfig?.isVerified && <ShieldCheck className="w-4 h-4 text-brand fill-brand/20" />}
+                            <span>{p.username}</span>
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-3">
+                          <span className="text-[10px] font-mono text-cyan-400">🪙 {p.coins ?? 0}</span>
+                          <span className="text-[10px] text-brand font-mono">{(p.ping || Math.floor(Math.random() * 20) + 15)}ms 🔵</span>
+                        </div>
+                      </div>
+                    ))}
+
+                    {/* NPCs List */}
                     {npcsRef.current.map(npc => (
-                      <div key={npc.id} className="bg-[#12151a] border border-white/5 p-3 rounded-lg flex justify-between items-center">
-                        <span className="text-xs font-bold flex items-center gap-1.5">
-                          {npc.isVerified && <ShieldCheck className="w-4 h-4 text-brand fill-brand/20" />}
-                          <span>{npc.name}</span>
-                        </span>
-                        <span className="text-[10px] text-[#00FF88]">ONLINE</span>
+                      <div key={npc.id} className="bg-[#12151a]/60 border border-white/5 p-3 rounded-lg flex justify-between items-center">
+                        <div className="flex items-center gap-2">
+                          <div className="w-6 h-6 rounded-md border border-gray-500/20 flex items-center justify-center text-[10px] bg-gray-500/10 text-gray-400 font-bold">
+                            AI
+                          </div>
+                          <span className="text-xs font-medium flex items-center gap-1.5 text-gray-400">
+                            {npc.isVerified && <ShieldCheck className="w-4 h-4 text-brand fill-brand/20" />}
+                            <span>{npc.name}</span>
+                          </span>
+                        </div>
+                        <span className="text-[10px] text-gray-500 font-mono">ONLINE</span>
                       </div>
                     ))}
                   </div>
@@ -2498,6 +3378,54 @@ export default function GameTestMode({ parts, onLeaveGame, vcVolume = 80, onVcVo
             </div>
           </div>
         </div>
+      )}
+
+      {/* VIRTUAL JOYSTICK & JUMP BUTTON FOR MOBILE */}
+      {showTouchControls && (
+        <>
+          {/* JOYSTICK BASE */}
+          <div 
+            id="virtual-joystick"
+            ref={joystickBaseRef}
+            onTouchStart={handleJoystickStart}
+            onTouchMove={handleJoystickMove}
+            onTouchEnd={handleJoystickEnd}
+            onTouchCancel={handleJoystickEnd}
+            className="absolute bottom-6 left-6 w-28 h-28 rounded-full bg-white/10 border-2 border-white/20 flex items-center justify-center pointer-events-auto touch-none z-[100] select-none shadow-[0_0_15px_rgba(255,255,255,0.05)]"
+          >
+            {/* JOYSTICK KNOB */}
+            <div 
+              className="w-12 h-12 rounded-full bg-white/40 border border-white/60 shadow-xl absolute select-none pointer-events-none transition-transform duration-75"
+              style={{
+                transform: `translate(${joystickPos.x}px, ${joystickPos.y}px)`
+              }}
+            />
+          </div>
+
+          {/* VIRTUAL JUMP BUTTON */}
+          <button
+            id="virtual-jump"
+            onTouchStart={handleJumpStart}
+            onTouchEnd={handleJumpEnd}
+            onTouchCancel={handleJumpEnd}
+            className="absolute bottom-8 right-8 w-16 h-16 rounded-full bg-black/60 border-2 border-white/20 flex items-center justify-center text-white pointer-events-auto active:bg-white/25 active:scale-95 transition-all shadow-2xl select-none touch-none z-[100] hover:bg-black/70"
+            title="Стрибок (Space)"
+          >
+            {/* Roblox Jump Icon style - dynamic upward chevron arrow */}
+            <svg 
+              xmlns="http://www.w3.org/2000/svg" 
+              viewBox="0 0 24 24" 
+              fill="none" 
+              stroke="currentColor" 
+              strokeWidth="3" 
+              strokeLinecap="round" 
+              strokeLinejoin="round" 
+              className="w-7 h-7 transform -translate-y-[1px] animate-pulse"
+            >
+              <polyline points="18 15 12 9 6 15" />
+            </svg>
+          </button>
+        </>
       )}
 
     </div>
